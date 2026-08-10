@@ -551,6 +551,7 @@ LANGUAGES = {
     "fi": {"flag": "fi", "name": "Finnish"},
     "th": {"flag": "th", "name": "Thai"},
     "tr": {"flag": "tr", "name": "Turkish"},
+    "ta": {"flag": "in", "name": "Tamil"},
 }
 # Turning off i18n by default as translation in most languages are
 # incomplete and not well maintained.
@@ -723,9 +724,10 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "TAGGING_SYSTEM": False,
     # Enables the version history panel on Explore and Dashboard pages.
     # History only accrues while ``ENABLE_VERSIONING_CAPTURE`` is also on;
-    # with capture off the panel renders but stays empty.
+    # with capture off the panel renders but stays empty, so the two ship
+    # with matching defaults and should be changed together.
     # @lifecycle: development
-    "VERSION_HISTORY": False,
+    "VERSION_HISTORY": True,
     # =================================================================
     # IN TESTING
     # =================================================================
@@ -1061,6 +1063,12 @@ COMMON_BOOTSTRAP_OVERRIDES_FUNC: Callable[  # noqa: E731
 
 # This is merely a default
 EXTRA_CATEGORICAL_COLOR_SCHEMES: list[dict[str, Any]] = []
+
+# EXTRA_THEME_TOKENS lets a deployment register additional custom theme token
+# names so they validate cleanly in the theme editor instead of being flagged as
+# unknown Ant Design tokens. Deployments and plugins that consume their own
+# tokens via useTheme add them here. This is merely a default.
+EXTRA_THEME_TOKENS: list[str] = []
 
 # -----------------------------------------------------------------------------
 # Theme System Configuration
@@ -1668,19 +1676,19 @@ DATETIME_FORMAT_DETECTION_SAMPLE_SIZE = 1000
 # The limit for the Superset Meta DB when the feature flag ENABLE_SUPERSET_META_DB is on
 SUPERSET_META_DB_LIMIT: int | None = 1000
 
-# Master switch for entity-version-history capture. Ships defaulted ``False``
-# so the versioning infrastructure (schema + Continuum wiring) lands inert:
-# no save writes shadow rows or a ``version_transaction``/``version_changes``
-# record, while the /versions/ endpoints stay available read-only (returning
-# empty). Set to ``True`` in ``superset_config.py`` (or via the env var of the
-# same name) to enable the before-flush listeners that drive capture.
-# Capture is activated by flipping this default to on once validated in
-# production. It is an operational escape hatch — for use when a
-# versioning-induced regression needs a 30-second recovery instead of
-# revert-and-redeploy — not a feature flag, and remains as the permanent
-# kill-switch.
+# Master switch for entity-version-history capture. Capture is enabled by
+# default, so saves write shadow rows and a ``version_transaction`` /
+# ``version_changes`` record. Set this to a falsy value in
+# ``superset_config.py`` (or via the environment variable of the same name) to
+# disable the before-flush listeners while keeping the /versions/ endpoints
+# available read-only.
+# Capture ships on. It is an operational escape hatch — set the environment
+# variable to a falsy value when a versioning-induced regression needs a
+# 30-second recovery instead of revert-and-redeploy — not a feature flag,
+# and it remains permanently as the kill-switch rather than being removed
+# with the rollout toggles.
 ENABLE_VERSIONING_CAPTURE: bool = utils.parse_boolean_string(
-    os.environ.get("ENABLE_VERSIONING_CAPTURE", "false")
+    os.environ.get("ENABLE_VERSIONING_CAPTURE", "true")
 )
 
 # Retention window (days) for entity version history. Version rows
@@ -2094,7 +2102,16 @@ TROUBLESHOOTING_LINK = ""
 WTF_CSRF_TIME_LIMIT = int(timedelta(weeks=1).total_seconds())
 
 # This link should lead to a page with instructions on how to gain access to a
-# Datasource. It will be placed at the bottom of permissions errors.
+# Datasource. It is surfaced as a "Request Access" link on data-permission
+# errors (e.g. when a viewer opens a chart whose dataset they cannot access).
+# The URL may include any of these placeholders, which are substituted with
+# URL-encoded values so the link can deep-link into an access-request system:
+#   {datasource_id}    - id of the denied dataset (datasource errors)
+#   {datasource_name}  - name of the denied dataset (datasource errors)
+#   {table_names}      - comma-separated denied table names (table/SQL errors)
+#   {username}         - the requesting user's username
+# A URL with no placeholders is used as-is. Example:
+#   "https://access.example.com/request?dataset={datasource_id}&user={username}"
 PERMISSION_INSTRUCTIONS_LINK = ""
 
 # Integrate external Blueprints to the app by passing them to your
