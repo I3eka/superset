@@ -38,6 +38,7 @@ from flask import current_app, Flask, g, has_app_context, Request, Response
 from flask_appbuilder import Model
 from flask_appbuilder.api import expose, protect, safe
 from flask_appbuilder.models.filters import BaseFilter
+from flask_appbuilder.security.manager import AUTH_REMOTE_USER
 from flask_appbuilder.security.sqla.apis import GroupApi, RoleApi, UserApi
 from flask_appbuilder.security.sqla.apis.permission_view_menu.api import (
     PermissionViewMenuApi,
@@ -3100,7 +3101,7 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             logger.warning(
                 "Dataset has no database will retry with database_id to set permission"
             )
-            database = self.session.query(Database).get(target.database_id)
+            database = self.session.get(Database, target.database_id)
             dataset_perm = self.get_dataset_perm(
                 target.id, target.table_name, database.database_name
             )
@@ -3981,6 +3982,21 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             if query in self.session:
                 self.session.expunge(query)
 
+        # When only ``database`` is provided, enforce database-level access
+        # here so the call is not a no-op.
+        if database and not (table or query):
+            if not self.can_access_database(database):
+                raise SupersetSecurityException(
+                    SupersetError(
+                        error_type=SupersetErrorType.DATABASE_SECURITY_ACCESS_ERROR,
+                        message=_(
+                            "You need access to the following database: %(name)s",
+                            name=database.database_name,
+                        ),
+                        level=ErrorLevel.WARNING,
+                    )
+                )
+
         if database and table or query:
             if query:
                 # Type narrow: only SQL Lab Query objects have .database attribute
@@ -4059,6 +4075,24 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
                                 "could not be fully parsed. Qualify tables "
                                 "explicitly and avoid dynamic SQL inside "
                                 "stored-procedure or vendor-specific calls."
+                            ),
+                            level=ErrorLevel.ERROR,
+                        )
+                    )
+                # Statements that rebind how unqualified table names resolve
+                # (``USE``, ``SET SCHEMA``, or a ``search_path`` change) make
+                # the qualification below diverge from what the engine uses at
+                # execution time, so reject them regardless of engine.
+                if force_dataset_match and parse_result.script.changes_default_schema():
+                    raise SupersetSecurityException(
+                        SupersetError(
+                            error_type=SupersetErrorType.QUERY_SECURITY_ACCESS_ERROR,
+                            message=_(
+                                "SQL Lab cannot authorise a script that "
+                                "changes the schema used to resolve "
+                                "unqualified table names (e.g. USE or "
+                                "search_path changes). Qualify tables "
+                                "explicitly instead."
                             ),
                             level=ErrorLevel.ERROR,
                         )
@@ -5086,7 +5120,19 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
     def register_views(self) -> None:
         from superset.views.auth import SupersetAuthView, SupersetRegisterUserView
 
-        if self.register_superset_auth_view:
+        # AUTH_REMOTE_USER has no interactive login form to render: the whole
+        # point is that an upstream proxy already authenticated the request and
+        # passes the identity via a header/env var, so FlaskAppBuilder's
+        # AuthRemoteUserView performs a silent GET-time login with no UI. That
+        # view registers at the same "/login/" route as SupersetAuthView, and
+        # since both add distinct Flask endpoints for the same URL rule,
+        # whichever gets registered first wins the dispatch -- SupersetAuthView
+        # always wins because it's added before super().register_views() runs
+        # FlaskAppBuilder's own auth_type dispatch. That silently shadows
+        # AUTH_REMOTE_USER: the SPA login shell renders instead of the header
+        # ever being checked. Skip registering it for this auth type so
+        # FlaskAppBuilder's AuthRemoteUserView actually claims the route.
+        if self.register_superset_auth_view and self.auth_type != AUTH_REMOTE_USER:
             self.auth_view = self.appbuilder.add_view_no_menu(SupersetAuthView)
         if self.register_superset_registeruser_view:
             self.registeruser_view = self.appbuilder.add_view_no_menu(
