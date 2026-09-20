@@ -1860,8 +1860,14 @@ class SQLStatement(BaseSQLStatement[exp.Expression]):
         """
         existing_ctes = self._parsed.args["with_"].expressions if self.has_cte() else []
         self._parsed.args["with_"] = None
+        query = SQLStatement(ast=self._parsed.copy(), engine=self.engine)
+        # SQL Server rejects ORDER BY in a CTE unless it limits rows. Ordering
+        # without TOP/OFFSET is not part of a relation's semantics anyway; the
+        # outer chart query owns its final ordering.
+        if self.engine == "mssql":
+            query.remove_unbounded_top_level_order_by()
         new_cte = exp.CTE(
-            this=self._parsed.copy(),
+            this=query._parsed,  # pylint: disable=protected-access
             alias=exp.TableAlias(this=exp.Identifier(this=alias)),
         )
         return SQLStatement(
