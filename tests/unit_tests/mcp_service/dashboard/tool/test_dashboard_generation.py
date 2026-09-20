@@ -852,31 +852,36 @@ class TestGenerateDashboard:
         # instead of the full ROOT_ID-rooted chain.
         truncated_layout = {
             "DASHBOARD_VERSION_KEY": "v2",
-            "ROOT_ID": {"type": "ROOT", "children": ["GRID_ID"]},
+            "ROOT_ID": {"id": "ROOT_ID", "type": "ROOT", "children": ["GRID_ID"]},
             "GRID_ID": {
+                "id": "GRID_ID",
                 "type": "GRID",
                 "children": ["TABS-lthree"],
                 "parents": ["ROOT_ID"],
             },
             "TABS-lthree": {
+                "id": "TABS-lthree",
                 "type": "TABS",
                 "children": ["TAB-out-quarter"],
                 "meta": {},
                 "parents": ["GRID_ID"],
             },
             "TAB-out-quarter": {
+                "id": "TAB-out-quarter",
                 "type": "TAB",
                 "children": ["ROW-out-prod"],
                 "meta": {"text": "Q4"},
                 "parents": ["TABS-lthree"],
             },
             "ROW-out-prod": {
+                "id": "ROW-out-prod",
                 "type": "ROW",
                 "children": ["CHART-1436"],
                 "meta": {},
                 "parents": ["TAB-out-quarter"],
             },
             "CHART-1436": {
+                "id": "CHART-1436",
                 "type": "CHART",
                 "children": [],
                 "meta": {"chartId": 1436},
@@ -920,10 +925,7 @@ class TestGenerateDashboard:
         mock_dashboard_cls,
         mcp_server,
     ) -> None:
-        """``generate_dashboard`` has no layout pre-flight, so a caller can
-        hand it a ``ROOT_ID`` whose ``children`` is not a list. The rebuild
-        skips the malformed entry instead of raising, leaving the rest of the
-        layout untouched."""
+        """Malformed root children fall back to a valid generated layout."""
         from superset.utils import json
 
         charts = [_mock_chart(id=1436, slice_name="Out of production")]
@@ -964,11 +966,12 @@ class TestGenerateDashboard:
             assert result.structured_content["error"] is None
             created = mock_dashboard_cls.return_value
             stored = json.loads(created.position_json)
-            # Nothing is reachable from a malformed root, so every component
-            # keeps the `parents` it came in with.
-            assert stored["ROOT_ID"]["children"] == 1
+            assert stored["ROOT_ID"]["children"] == ["GRID_ID"]
             assert stored["GRID_ID"]["parents"] == ["ROOT_ID"]
-            assert stored["CHART-1436"]["parents"] == ["GRID_ID"]
+            assert stored["CHART-1436"]["parents"][:2] == ["ROOT_ID", "GRID_ID"]
+            assert result.structured_content["warnings"] == [
+                "position_json was invalid; used an auto-generated layout."
+            ]
 
     @pytest.mark.parametrize(
         "position_json",
