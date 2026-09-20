@@ -514,6 +514,10 @@ production default, includes prompts and SQL in them.
 | `AI_TELEMETRY_REDACT_CONTENT` | `True` | Withhold prompts, answers, SQL and data from telemetry. |
 | `AI_TELEMETRY_MAX_CONTENT_CHARS` | `10000` | Cap per content field when redaction is off. |
 
+Suggested prompts are disabled by default. Enabling them makes one additional
+model call when an empty panel requests suggestions, so it has the same provider
+cost and data-governance implications as any other model request.
+
 ## Things worth knowing before you turn it on
 
 - **A language model can be confidently wrong.** The assistant shows the SQL it
