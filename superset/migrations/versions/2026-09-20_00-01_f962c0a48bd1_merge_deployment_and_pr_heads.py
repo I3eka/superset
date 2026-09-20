@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Merge the local Native AI and upstream migration branches.
 """Join the preserved deployment and open-PR migration heads.
 
 Revision ID: f962c0a48bd1
