@@ -483,6 +483,24 @@ class TestAIApi(SupersetTestCase):
         assert second.status_code == 200
         assert db.session.query(AIChatFeedback).count() == 1
 
+    def test_feedback_on_user_message_is_422(self) -> None:
+        from superset.commands.ai.append_message import AppendAIChatMessageCommand
+
+        self.login("admin")
+        thread_uuid = self._create_thread()["uuid"]
+        thread = db.session.query(AIChatThread).filter_by(uuid=thread_uuid).one()
+        message = AppendAIChatMessageCommand(
+            thread.uuid, thread.created_by_fk, "user", "My question"
+        ).run()
+
+        response = self.client.post(
+            f"{AI_BASE}/feedback",
+            json={"message_uuid": str(message.uuid), "liked": True},
+        )
+
+        assert response.status_code == 422
+        assert db.session.query(AIChatFeedback).count() == 0
+
     def test_feedback_on_unknown_message_is_404(self) -> None:
         """Feedback cannot be attached to a message that does not exist."""
         self.login("admin")
