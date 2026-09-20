@@ -428,6 +428,8 @@ export interface StreamRunOptions {
   onThoughts?: (delta: string) => void;
   /** A chunk of the answer. */
   onAssistantDelta?: (delta: string) => void;
+  /** The authoritative replacement from the final frame. */
+  onAssistantFinal?: (content: string) => void;
   /**
    * A pause. The reader stops until the returned promise resolves, which is what
    * makes the checkpoint a gate the user can act on rather than a notice that
@@ -464,6 +466,7 @@ export const streamRun = async ({
   onThinking,
   onThoughts,
   onAssistantDelta,
+  onAssistantFinal,
   onCheckpoint,
   streamTimeoutMs = STREAM_TIMEOUT_MS,
 }: StreamRunOptions): Promise<StreamResult> => {
@@ -524,6 +527,9 @@ export const streamRun = async ({
       buffer = parsed.remainder;
 
       for (const raw of parsed.events) {
+        if (signal?.aborted) {
+          throw new ChatRequestAbortedError('Chat request was cancelled');
+        }
         const body = frameBody(raw.data);
         switch (raw.event) {
           case 'session': {
@@ -566,6 +572,7 @@ export const streamRun = async ({
             // Replaced, not appended: a dropped or duplicated delta cannot then
             // corrupt what the user ends up reading.
             content = readString(body, 'content') ?? content;
+            onAssistantFinal?.(content);
             break;
           }
           case 'cancelled': {
