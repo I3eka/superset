@@ -135,6 +135,7 @@ class ToolInvocation:
     duration_ms: int = 0
     truncated: bool = False
     arguments: dict[str, Any] = field(default_factory=dict)
+    error_type: str | None = None
 
     @property
     def is_error(self) -> bool:
@@ -383,20 +384,22 @@ class ToolRegistry:
         def elapsed() -> int:
             return int((time.monotonic() - started) * 1000)
 
-        def failure(message: str) -> ToolInvocation:
+        def failure(message: str, error_type: str) -> ToolInvocation:
             return ToolInvocation(
                 call_id=call.id,
                 tool_name=call.name,
                 result=ToolResult(call_id=call.id, content=message, is_error=True),
                 duration_ms=elapsed(),
                 arguments=dict(call.arguments),
+                error_type=error_type,
             )
 
         tool = self._tools.get(call.name)
         if tool is None:
             available = ", ".join(sorted(self._tools)) or "none"
             return failure(
-                f"No tool named {call.name!r}. Available tools: {available}."
+                f"No tool named {call.name!r}. Available tools: {available}.",
+                "ToolUnavailable",
             )
 
         # Every tool here reads a permissioned resource, so all of them need a
@@ -407,7 +410,8 @@ class ToolRegistry:
         if _current_user() is None:
             return failure(
                 f"{call.name} requires an authenticated user and none is "
-                f"available for this request."
+                f"available for this request.",
+                "AuthenticationRequired",
             )
 
         if max_bytes is None:
@@ -416,7 +420,7 @@ class ToolRegistry:
         try:
             output = tool.run(**call.arguments)
         except ToolError as ex:
-            return failure(str(ex))
+            return failure(str(ex), type(ex).__name__)
         except TypeError as ex:
             # Almost always the model supplying arguments that do not match the
             # schema. Reported as-is because the message names the offending
@@ -424,14 +428,16 @@ class ToolRegistry:
             logger.info("Tool %s called with bad arguments: %s", call.name, ex)
             return failure(
                 f"{call.name} was called with arguments that do not match its "
-                f"schema: {ex}"
+                f"schema: {ex}",
+                type(ex).__name__,
             )
-        except Exception:  # pylint: disable=broad-except
+        except Exception as ex:  # pylint: disable=broad-except
             # A defect, not a recoverable condition. The real cause goes to the
             # log; the model gets a message that cannot leak a driver error.
             logger.exception("Tool %s failed", call.name)
             return failure(
-                f"{call.name} failed unexpectedly. Try a different approach."
+                f"{call.name} failed unexpectedly. Try a different approach.",
+                type(ex).__name__,
             )
 
         if output.payload is not None:
@@ -514,10 +520,8 @@ def _configured_max_bytes() -> int:
         return _DEFAULT_MAX_BYTES
 
 
-#: Every built-in tool name. The single source of truth for configuration
-#: validation and documentation: an operator naming a tool in an agent profile's
-#: allowlist is naming one of these.
-ALL_TOOL_NAMES: tuple[str, ...] = (
+#: Tools that inspect Superset or run a read-only warehouse query.
+READ_ONLY_TOOL_NAMES: tuple[str, ...] = (
     "search_assets",
     "list_databases",
     "get_schema",
@@ -526,6 +530,18 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "get_chart_context",
     "get_dashboard_context",
 )
+
+#: Asset mutations that a deployment must explicitly add to an agent profile.
+AUTHORING_TOOL_NAMES: tuple[str, ...] = (
+    "create_virtual_dataset",
+    "generate_chart",
+    "generate_dashboard",
+)
+
+#: Every built-in tool name. The single source of truth for configuration
+#: validation and documentation: an operator naming a tool in an agent profile's
+#: allowlist is naming one of these.
+ALL_TOOL_NAMES: tuple[str, ...] = READ_ONLY_TOOL_NAMES + AUTHORING_TOOL_NAMES
 
 #: Names in :data:`ALL_TOOL_NAMES` that do not run a warehouse query.
 DISCOVERY_TOOL_NAMES: tuple[str, ...] = (
@@ -544,6 +560,11 @@ def _all_tools() -> list[AITool]:
     Imports are local because these modules reach into models, DAOs and the
     security manager, and this one is imported from configuration-time code.
     """
+    from superset.ai.tools.authoring import (
+        CreateVirtualDatasetTool,
+        GenerateChartTool,
+        GenerateDashboardTool,
+    )
     from superset.ai.tools.context import GetChartContextTool, GetDashboardContextTool
     from superset.ai.tools.metadata import GetSchemaTool, ListDatabasesTool
     from superset.ai.tools.search import SearchAssetsTool
@@ -557,10 +578,15 @@ def _all_tools() -> list[AITool]:
         ValidateSqlTool(),
         GetChartContextTool(),
         GetDashboardContextTool(),
+        CreateVirtualDatasetTool(),
+        GenerateChartTool(),
+        GenerateDashboardTool(),
     ]
 
 
-#: The full read-only surface. The default for an analysis agent.
+#: Every built-in tool, including explicit asset authoring operations.
+BUNDLE_ALL = "all"
+#: The full read-only surface. The default for shipped agent profiles.
 BUNDLE_READ_ONLY = "read_only"
 #: Metadata and context only; cannot execute SQL. Useful for a cheap routing or
 #: classification pass that should not be able to reach a warehouse.
@@ -570,7 +596,8 @@ BUNDLE_DISCOVERY = "discovery"
 #: ask for instead of enumerating tools, and every member is in
 #: :data:`ALL_TOOL_NAMES`.
 BUNDLES: dict[str, tuple[str, ...]] = {
-    BUNDLE_READ_ONLY: ALL_TOOL_NAMES,
+    BUNDLE_ALL: ALL_TOOL_NAMES,
+    BUNDLE_READ_ONLY: READ_ONLY_TOOL_NAMES,
     BUNDLE_DISCOVERY: DISCOVERY_TOOL_NAMES,
 }
 

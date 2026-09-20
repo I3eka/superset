@@ -190,6 +190,11 @@ class TestGenerateChart:
         for i, f in enumerate(filters):
             assert f.op == operators[i]
 
+        null_filter = FilterConfig(column="optional_value", op="IS NOT NULL")
+        assert null_filter.value is None
+        with pytest.raises(ValueError, match="requires 'value'"):
+            FilterConfig(column="optional_value", op="=")
+
     @pytest.mark.asyncio
     async def test_generate_chart_response_structure(self):
         """Test the expected response structure for chart generation."""
@@ -307,6 +312,11 @@ class TestGenerateChart:
         assert col2.name == "sales"
         assert col2.aggregate == "SUM"
         assert col2.label == "Total Sales"
+
+        # Common LLM spelling accepted alongside the canonical ``name``.
+        aliased = ColumnRef.model_validate({"column": "sales", "aggregate": "AVG"})
+        assert aliased.name == "sales"
+        assert aliased.aggregate == "AVG"
 
         # All supported aggregations
         aggs = ["SUM", "AVG", "COUNT", "MIN", "MAX", "COUNT_DISTINCT"]
@@ -475,7 +485,8 @@ class _DetachableSlice:
 
 async def _generate_saved_chart(
     refetch: Any,
-) -> tuple[Any, _DetachableSlice]:
+    compile_result: CompileResult | None = None,
+) -> tuple[Any, _DetachableSlice, Mock]:
     """Run generate_chart(save_chart=True) with a chart that detaches on commit.
 
     ``refetch`` is used as the ``ChartDAO.find_by_id`` behaviour of the
@@ -503,6 +514,7 @@ async def _generate_saved_chart(
     # The instance is detached right after the commit, before any of the reads
     # that build the response.
     session.refresh.side_effect = lambda _chart: chart.detach()
+    create_command = Mock(return_value=Mock(run=Mock(return_value=chart)))
 
     with (
         patch(
@@ -524,12 +536,12 @@ async def _generate_saved_chart(
         patch("superset.mcp_service.auth.has_dataset_access", return_value=True),
         patch(
             "superset.commands.chart.create.CreateChartCommand",
-            return_value=Mock(run=Mock(return_value=chart)),
+            create_command,
         ),
         patch("superset.db.session", session),
         patch(
             "superset.mcp_service.chart.tool.generate_chart._compile_chart",
-            return_value=CompileResult(success=True, warnings=[]),
+            return_value=compile_result or CompileResult(success=True, warnings=[]),
         ),
         patch("superset.daos.chart.ChartDAO", Mock(find_by_id=refetch)),
         patch(
@@ -543,7 +555,7 @@ async def _generate_saved_chart(
     ):
         result = await generate_chart(request, ctx=ctx)
 
-    return result, chart
+    return result, chart, create_command
 
 
 class TestGenerateChartDetachedInstance:
@@ -560,7 +572,7 @@ class TestGenerateChartDetachedInstance:
         """A detached instance no longer turns a committed chart into an error."""
         refetched = _make_mock_chart()
 
-        result, chart = await _generate_saved_chart(
+        result, chart, _create_command = await _generate_saved_chart(
             refetch=Mock(return_value=refetched)
         )
 
@@ -575,7 +587,7 @@ class TestGenerateChartDetachedInstance:
     @pytest.mark.asyncio
     async def test_detached_chart_falls_back_to_captured_scalars(self) -> None:
         """The minimal fallback response never reads the detached instance."""
-        result, chart = await _generate_saved_chart(
+        result, chart, _create_command = await _generate_saved_chart(
             refetch=Mock(side_effect=SQLAlchemyError("session is gone"))
         )
 
@@ -586,6 +598,23 @@ class TestGenerateChartDetachedInstance:
         assert result.chart.id == 42
         assert result.chart.slice_name == "Concurrent chart"
         assert result.chart.viz_type == "table"
+
+    @pytest.mark.asyncio
+    async def test_compile_failure_does_not_create_a_chart(self) -> None:
+        result, chart, create_command = await _generate_saved_chart(
+            refetch=Mock(),
+            compile_result=CompileResult(
+                success=False,
+                error="SQL Server error 8120: not in GROUP BY",
+                error_code="CHART_COMPILE_FAILED",
+                tier="compile",
+            ),
+        )
+
+        assert result.success is False
+        assert result.chart is None
+        assert chart._detached is False
+        create_command.assert_not_called()
 
 
 class TestChartSerializationEagerLoading:

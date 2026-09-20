@@ -350,6 +350,7 @@ def test_a_failed_invocation_has_no_display_payload() -> None:
     )
     assert invocation.is_error is True
     assert invocation.display is None
+    assert invocation.error_type == "ToolError"
 
 
 def test_the_display_payload_is_bounded_too() -> None:
@@ -472,7 +473,17 @@ def test_all_tool_names_matches_what_is_actually_built() -> None:
 
 def test_bundles_expose_the_expected_tools() -> None:
     """The assigned tool set, and nothing else."""
-    from superset.ai.tools import build_registry, BUNDLE_DISCOVERY, BUNDLE_READ_ONLY
+    from superset.ai.tools import (
+        build_registry,
+        BUNDLE_ALL,
+        BUNDLE_DISCOVERY,
+        BUNDLE_READ_ONLY,
+    )
+
+    all_tools = build_registry(BUNDLE_ALL)
+    assert "create_virtual_dataset" in all_tools
+    assert "generate_chart" in all_tools
+    assert "generate_dashboard" in all_tools
 
     read_only = build_registry(BUNDLE_READ_ONLY)
     assert set(read_only.names()) == {
@@ -484,6 +495,9 @@ def test_bundles_expose_the_expected_tools() -> None:
         "get_chart_context",
         "get_dashboard_context",
     }
+    assert "generate_chart" not in read_only
+    assert "generate_dashboard" not in read_only
+    assert build_registry().names() == read_only.names()
 
     discovery = build_registry(BUNDLE_DISCOVERY)
     # The point of this bundle is that it cannot reach a warehouse.
@@ -1322,6 +1336,23 @@ def test_search_assets_escapes_like_wildcards_in_the_term() -> None:
     args, kwargs = column.ilike.call_args
     assert kwargs["escape"] == "\\"
     assert r"100\%\_x" in args[0]
+
+
+def test_search_assets_matches_words_across_identifier_separators() -> None:
+    """A human-space query finds names that use underscores."""
+    from sqlalchemy import column
+
+    from superset.ai.tools.search import _match
+
+    sql = str(
+        _match(column("table_name"), "sales report").compile(
+            compile_kwargs={"literal_binds": True}
+        )
+    )
+
+    assert "%sales%" in sql
+    assert "%report%" in sql
+    assert " AND " in sql
 
 
 def test_search_assets_wraps_user_authored_text_as_untrusted() -> None:

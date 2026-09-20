@@ -186,10 +186,13 @@ class MessagesApiRuntime(BaseAgentRuntime):
                 return
 
         # Budget exhausted without the model choosing to stop.
+        self._result.answer = _NO_ANSWER
+        self._result.error = "Agent reached the step limit before a final answer."
         yield thinking_event(
             ProgressStage.FALLBACK,
-            "Reached the step limit — answering with what I have",
+            "Reached the step limit before finishing",
         )
+        yield error_event(_NO_ANSWER)
 
     async def _consume(
         self,
@@ -452,7 +455,13 @@ class MessagesApiRuntime(BaseAgentRuntime):
                 {},
                 error_type=type(ex).__name__,
             )
-        return self._traced(call, result, detail)
+        error_type = detail.get("error_type")
+        return self._traced(
+            call,
+            result,
+            detail,
+            error_type=str(error_type) if error_type else None,
+        )
 
     def _traced(
         self,
@@ -503,6 +512,8 @@ class MessagesApiRuntime(BaseAgentRuntime):
         detail: dict[str, Any] = {"duration_ms": getattr(invocation, "duration_ms", 0)}
         if getattr(invocation, "truncated", False):
             detail["truncated"] = True
+        if error_type := getattr(invocation, "error_type", None):
+            detail["error_type"] = error_type
         if display := getattr(invocation, "display", None):
             detail["display"] = display
         return invocation.result, detail

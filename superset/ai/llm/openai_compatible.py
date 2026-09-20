@@ -265,7 +265,7 @@ def _sdk() -> Any:
     except ModuleNotFoundError as ex:
         raise LLMConfigurationError(
             "The OpenAI-compatible provider requires the 'openai' package, "
-            "which is not installed. Run `pip install openai`, or point "
+            "which is not installed. Run `pip install OpenAI`, or point "
             "AI_LLM_PROVIDER_CLASS at a provider whose dependencies are present."
         ) from ex
     return openai

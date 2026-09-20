@@ -26,6 +26,7 @@ import {
 import { isFeatureEnabled, getExtensionsRegistry } from '@superset-ui/core';
 import Welcome from 'src/pages/Home';
 import setupCodeOverrides from 'src/setup/setupCodeOverrides';
+import { redirect } from 'src/utils/navigationUtils';
 
 const chartsEndpoint = 'glob:*/api/v1/chart/?*';
 const chartInfoEndpoint = 'glob:*/api/v1/chart/_info?*';
@@ -146,6 +147,11 @@ jest.mock('@superset-ui/core', () => ({
   isFeatureEnabled: jest.fn(),
 }));
 
+jest.mock('src/utils/navigationUtils', () => ({
+  ...jest.requireActual('src/utils/navigationUtils'),
+  redirect: jest.fn(),
+}));
+
 const mockedIsFeatureEnabled = isFeatureEnabled as jest.Mock;
 
 const renderWelcome = (props = mockedProps) =>
@@ -158,11 +164,35 @@ const renderWelcome = (props = mockedProps) =>
 
 afterEach(() => {
   fetchMock.clearHistory();
+  jest.mocked(redirect).mockClear();
 });
+
+test.each([
+  ['anonymous', { roles: { Public: [] }, permissions: {}, groups: [] }],
+  ['guest', { ...mockedProps.user, userId: undefined }],
+  ['missing', undefined],
+])(
+  'Redirects the %s user through the server without fetching Home data',
+  (_, user) => {
+    render(<Welcome user={user} />, { useRedux: true, useRouter: true });
+
+    expect(redirect).toHaveBeenCalledWith('/welcome/');
+    [
+      chartsEndpoint,
+      dashboardsEndpoint,
+      recentActivityEndpoint,
+      savedQueryEndpoint,
+    ].forEach(endpoint => {
+      expect(fetchMock.callHistory.calls(endpoint)).toHaveLength(0);
+    });
+    expect(screen.queryByText('Dashboards')).not.toBeInTheDocument();
+  },
+);
 
 test('With sql role - renders', async () => {
   await renderWelcome();
   expect(await screen.findByText('Dashboards')).toBeInTheDocument();
+  expect(redirect).not.toHaveBeenCalled();
 });
 
 test('With sql role - renders all panels on the page on page load', async () => {
