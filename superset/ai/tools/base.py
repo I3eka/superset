@@ -402,7 +402,7 @@ class ToolRegistry:
                 "ToolUnavailable",
             )
 
-        # Every tool here reads a permissioned resource, so all of them need a
+        # Every tool here acts on a permissioned resource, so all of them need a
         # principal to check against. Gated once, here, rather than in each tool:
         # a tool that forgot would otherwise fall through to whatever the
         # security manager does with an absent user, which is not a decision
