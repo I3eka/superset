@@ -1356,14 +1356,15 @@ def test_search_assets_escapes_like_wildcards_in_the_term() -> None:
     assert r"100\%\_x" in args[0]
 
 
-def test_search_assets_matches_words_across_identifier_separators() -> None:
+@pytest.mark.parametrize("term", ["sales report", "sales-report"])
+def test_search_assets_matches_words_across_identifier_separators(term: str) -> None:
     """A human-space query finds names that use underscores."""
     from sqlalchemy import column
 
     from superset.ai.tools.search import _match
 
     sql = str(
-        _match(column("table_name"), "sales report").compile(
+        _match(column("table_name"), term).compile(
             compile_kwargs={"literal_binds": True}
         )
     )
