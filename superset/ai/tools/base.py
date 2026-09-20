@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from superset.ai.llm.base import ToolCall, ToolDefinition, ToolResult
-from superset.ai.sanitization import (
+from superset.ai.prompt_framing import (
     LLM_CONTEXT_CLOSE_DELIMITER,
     LLM_CONTEXT_ESCAPED_CLOSE_DELIMITER,
     LLM_CONTEXT_ESCAPED_OPEN_DELIMITER,
