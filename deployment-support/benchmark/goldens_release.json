@@ -1,0 +1,199 @@
+{
+  "benchmark_version": "3.1.0",
+  "source": "live Superset SQL Lab against database_id 3",
+  "source_started_at": "2026-08-17T02:37:20.626594+00:00",
+  "frozen_period": {
+    "start_inclusive": "2026-07-12",
+    "end_exclusive": "2026-08-12"
+  },
+  "golden_rows": {
+    "dashboard_peak_unique_calls": [
+      {
+        "peak_date": "2026-08-03",
+        "unique_calls": 2336
+      }
+    ],
+    "month_automation_level": [
+      {
+        "automated_calls": 9053,
+        "total_calls": 30410,
+        "automation_pct": 29.77
+      }
+    ],
+    "month_peak_automation_day": [
+      {
+        "peak_date": "2026-07-19",
+        "automated_calls": 158,
+        "total_calls": 406,
+        "automation_pct": 38.92
+      }
+    ],
+    "month_top_completion_path": [
+      {
+        "top_path": "Менеджер",
+        "path_calls": 11907,
+        "path_pct": 39.15
+      }
+    ],
+    "month_manager_vs_automated": [
+      {
+        "manager_calls": 20053,
+        "automated_calls": 9053,
+        "total_calls": 30410
+      }
+    ],
+    "month_button_channel_shares": [
+      {
+        "robot_pct": 25.33,
+        "ivr_pct": 30.97,
+        "custom_pct": 2.06
+      }
+    ],
+    "month_automation_tool_shares": [
+      {
+        "robot_pct": 10.26,
+        "ivr_pct": 18.38,
+        "custom_pct": 0.5,
+        "mixed_pct": 0.63
+      }
+    ],
+    "month_manager_repeat_rate": [
+      {
+        "repeat_calls": 2176,
+        "manager_calls": 11907,
+        "repeat_pct": 18.27
+      }
+    ],
+    "month_peak_manager_repeat_day": [
+      {
+        "peak_date": "2026-07-22",
+        "repeat_calls": 91,
+        "manager_calls": 408,
+        "repeat_pct": 22.3
+      }
+    ],
+    "ivr_top_menu_choice": [
+      {
+        "top_choice": "Каз. Инструкция оформление",
+        "choice_count": 5858
+      }
+    ],
+    "ivr_language_split": [
+      {
+        "kz_choices": 9091,
+        "ru_choices": 3598,
+        "total_choices": 12689
+      }
+    ],
+    "ivr_policy_download_split": [
+      {
+        "kz_downloads": 974,
+        "ru_downloads": 0,
+        "total_downloads": 974
+      }
+    ],
+    "ivr_status_vs_application": [
+      {
+        "status_choices": 2060,
+        "application_choices": 2971,
+        "difference": 911
+      }
+    ],
+    "ivr_phone_capture_counts": [
+      {
+        "missed_numbers": 4141,
+        "captured_numbers": 8548,
+        "total_attempts": 12689
+      }
+    ],
+    "ivr_phone_capture_rate": [
+      {
+        "captured_numbers": 8548,
+        "total_attempts": 12689,
+        "capture_pct": 67.37
+      }
+    ],
+    "ivr_worst_phone_capture_day": [
+      {
+        "worst_date": "2026-07-31",
+        "missed_numbers": 196,
+        "total_attempts": 581,
+        "missed_pct": 33.73
+      }
+    ],
+    "robot_route_outcomes": [
+      {
+        "robot_calls": 3565,
+        "direct_manager_calls": 3355,
+        "other_calls": 4462,
+        "total_calls": 11382
+      }
+    ],
+    "robot_top_source": [
+      {
+        "top_source": "rbt",
+        "source_calls": 3565,
+        "source_pct": 31.32
+      }
+    ],
+    "robot_peak_day": [
+      {
+        "peak_date": "2026-07-13",
+        "robot_branch_calls": 512
+      }
+    ],
+    "robot_confidence_rate": [
+      {
+        "confident_calls": 23190,
+        "total_calls": 26274,
+        "confidence_pct": 88.26
+      }
+    ],
+    "robot_lowest_confidence_day": [
+      {
+        "lowest_date": "2026-08-08",
+        "confident_calls": 292,
+        "total_calls": 402,
+        "confidence_pct": 72.64
+      }
+    ],
+    "robot_top_response_class": [
+      {
+        "top_class": "Менеджер",
+        "class_calls": 14375,
+        "class_pct": 58.54
+      }
+    ],
+    "robot_manager_vs_self_service": [
+      {
+        "manager_calls": 14375,
+        "self_service_calls": 4765,
+        "qualified_calls": 24556
+      }
+    ],
+    "robot_business_intent_breakdown": [
+      {
+        "new_policy_calls": 1574,
+        "reissue_calls": 1241,
+        "price_calls": 324,
+        "terminate_calls": 176,
+        "renew_calls": 893,
+        "download_calls": 557
+      }
+    ],
+    "robot_spam_share": [
+      {
+        "spam_calls": 1927,
+        "qualified_calls": 24556,
+        "spam_pct": 7.85
+      }
+    ],
+    "dashboard_shift_briefing": [
+      {
+        "automation_pct": 29.77,
+        "capture_pct": 67.37,
+        "confidence_pct": 88.26
+      }
+    ]
+  }
+}
