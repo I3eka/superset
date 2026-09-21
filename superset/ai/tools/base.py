@@ -68,6 +68,15 @@ _DISPLAY_BUDGET_FRACTION = 0.5
 _DEFAULT_MAX_BYTES = 256 * 1024
 
 
+def _json_text(payload: Any) -> str:
+    """Keep Unicode readable, escaping only code points that are not valid UTF-8."""
+    return (
+        json.dumps(payload, default=str, ensure_ascii=False)
+        .encode("utf-8", "backslashreplace")
+        .decode("utf-8")
+    )
+
+
 class ToolError(Exception):
     """
     A failure that should be shown to the model rather than raised at the user.
@@ -112,7 +121,7 @@ class ToolOutput:
     ) -> ToolOutput:
         """Serialise ``payload`` as the model-facing content."""
         return cls(
-            content=json.dumps(payload, default=str),
+            content=_json_text(payload),
             display=display,
             payload=payload,
         )
@@ -199,7 +208,7 @@ def truncate_payload(payload: Any, max_bytes: int) -> tuple[str, bool]:
     shortened largest-first so useful smaller fields survive without cutting JSON
     mid-token.
     """
-    text = json.dumps(payload, default=str)
+    text = _json_text(payload)
     if len(text.encode("utf-8")) <= max_bytes:
         return text, False
 
@@ -218,7 +227,7 @@ def truncate_payload(payload: Any, max_bytes: int) -> tuple[str, bool]:
         )
 
         while True:
-            text = json.dumps(candidate, default=str)
+            text = _json_text(candidate)
             if len(text.encode("utf-8")) <= max_bytes:
                 return text, True
             values = {
@@ -230,9 +239,7 @@ def truncate_payload(payload: Any, max_bytes: int) -> tuple[str, bool]:
                 break
             key = max(
                 values,
-                key=lambda item: len(
-                    json.dumps(values[item], default=str).encode("utf-8")
-                ),
+                key=lambda item: len(_json_text(values[item]).encode("utf-8")),
             )
             value = values[key]
             if isinstance(value, str) and len(value) > 1:
