@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from superset_core.mcp.decorators import tool, ToolAnnotations
 
+from superset.dashboards.layout import repair_position
 from superset.extensions import db, event_logger
 from superset.mcp_service.dashboard.constants import (
     generate_id,
@@ -270,11 +271,15 @@ def generate_dashboard(  # noqa: C901
         # Create dashboard layout with chart objects.
         # Validate custom layouts, then rebuild derived parent metadata.
         with event_logger.log_context(action="mcp.generate_dashboard.layout"):
-            if request.position_json and (
-                validate_dashboard_layout(request.position_json, found_chart_ids)
-                is None
+            candidate_layout = (
+                repair_position(request.position_json)
+                if request.position_json
+                else None
+            )
+            if candidate_layout and (
+                validate_dashboard_layout(candidate_layout, found_chart_ids) is None
             ):
-                layout = rebuild_parent_chains(request.position_json)
+                layout = rebuild_parent_chains(candidate_layout)
             else:
                 layout = _create_dashboard_layout(chart_objects)
                 if request.position_json:
