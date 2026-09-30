@@ -19,6 +19,7 @@
 from datetime import datetime
 from typing import Any
 
+import pytest
 from pytest_mock import MockerFixture
 from sqlalchemy.orm.session import Session
 
@@ -180,6 +181,12 @@ def test_prune_task_is_registered_in_the_default_daily_schedule() -> None:
     assert entry["task"] == "ai.prune_conversations"
     assert entry["schedule"].minute == {30}
     assert entry["schedule"].hour == {3}
+    assert (
+        config.CeleryConfig.beat_schedule["deletion_retention.prune_purge_audit"][
+            "task"
+        ]
+        == "deletion_retention.prune_purge_audit"
+    )
 
 
 def test_create_for_user_records_the_owner_and_assigns_an_identifier(
@@ -288,9 +295,11 @@ def test_create_idempotent_returns_the_stored_turn_on_replay(
     assert session.query(AIChatMessage).count() == 1
 
 
+@pytest.mark.parametrize("role", ["user", "assistant"])
 def test_create_idempotent_recovers_from_a_racing_insert(
     session: Session,
     mocker: MockerFixture,
+    role: str,
 ) -> None:
     """
     A replay that races the original resolves to the row that won.
@@ -307,7 +316,12 @@ def test_create_idempotent_recovers_from_a_racing_insert(
     _create_tables(session)
     thread = AIChatThreadDAO.create_for_user(USER_A)
     first, _ = AIChatMessageDAO.create_idempotent(
-        thread, MessageRole.USER, "how many users?", user_id=USER_A, request_id="req-1"
+        thread,
+        role,
+        "how many users?",
+        user_id=USER_A,
+        request_id="req-1",
+        extra={"run_id": "accepted-run"},
     )
 
     lookup = AIChatMessageDAO.find_by_request_id
@@ -326,11 +340,17 @@ def test_create_idempotent_recovers_from_a_racing_insert(
     )
 
     replay, created = AIChatMessageDAO.create_idempotent(
-        thread, MessageRole.USER, "how many users?", user_id=USER_A, request_id="req-1"
+        thread,
+        role,
+        "how many users?",
+        user_id=USER_A,
+        request_id="req-1",
+        extra={"run_id": "racing-run"},
     )
 
     assert created is False
     assert replay.id == first.id
+    assert replay.extra["run_id"] == "accepted-run"
     assert session.query(AIChatMessage).count() == 1
     # The session survived the rejected insert and can still be written to.
     AIChatMessageDAO.create_idempotent(
