@@ -930,7 +930,7 @@ def test_orchestrated_model_matches_provider_and_audit_trail(
         "superset.ai.factories.get_tools_for_profile", return_value=StubTools()
     )
     mocker.patch("superset.ai.orchestrator._build_system_prompt", return_value="Test")
-    mocker.patch("superset.ai.orchestrator._mark_streaming")
+    mocker.patch("superset.ai.orchestrator._claim_pending", return_value=True)
     mocker.patch(
         "superset.daos.ai.AIChatThreadDAO.find_by_uuid_for_user", return_value=object()
     )

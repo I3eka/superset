@@ -90,7 +90,16 @@ def test_post_replay_keeps_run_and_accepted_context(
     """Changed replay parameters must not overwrite the accepted run."""
     from superset.models.ai import AIChatMessage
 
-    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_EXECUTION_MODE": mode})
+    mocker.patch.dict(
+        current_app.config,
+        {
+            "AI_ASSISTANT_EXECUTION_MODE": mode,
+            "AI_AGENT_PROFILES": {
+                "first-agent": {"name": "First agent", "tools": []},
+                "different-agent": {"name": "Different agent", "tools": []},
+            },
+        },
+    )
     submitted = mocker.patch("superset.ai.tasks.submit_turn")
     context = {"dashboard_id": 42}
     first = _post(
@@ -113,6 +122,7 @@ def test_post_replay_keeps_run_and_accepted_context(
     assistant = session.query(AIChatMessage).filter_by(role="assistant").one()
     assert assistant.extra["model"] == "first-model"
     assert assistant.extra["agent_key"] == "first-agent"
+    assert assistant.thread.agent_key == "first-agent"
     assert assistant.extra["page_context"] == context
     for call in submitted.call_args_list:
         assert call.args[0].run_id == first.json["result"]["run_id"]
