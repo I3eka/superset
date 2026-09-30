@@ -58,11 +58,7 @@ export const THREAD_ENDPOINT = `${AI_ROOT}/thread/`;
 export const FEEDBACK_ENDPOINT = `${AI_ROOT}/feedback`;
 export const SUGGESTED_PROMPTS_ENDPOINT = `${AI_ROOT}/suggested-prompts`;
 
-/**
- * Selecting no profile is a valid choice: the backend then uses the deployment's
- * default. The key is a sentinel rather than `undefined` so it can round-trip
- * through the agent `<Select>` and localStorage.
- */
+/** The built-in default profile; omitting a key reuses the conversation's profile. */
 export const DEFAULT_AGENT_KEY = 'default';
 
 export const DEFAULT_CHAT_AGENT: AiAgent = {
@@ -71,7 +67,7 @@ export const DEFAULT_CHAT_AGENT: AiAgent = {
   tools: [],
 };
 
-/** Where the selected profile is remembered between sessions. */
+/** The preferred profile for new conversations between sessions. */
 export const AGENT_STORAGE_KEY = 'superset-chat-agent';
 
 /**
@@ -393,10 +389,7 @@ export const startRun = async ({
     jsonPayload: {
       content,
       request_id: requestId,
-      // The sentinel is a local convention, not a profile the backend knows.
-      ...(agentKey && agentKey !== DEFAULT_AGENT_KEY
-        ? { agent_key: agentKey }
-        : {}),
+      ...(agentKey ? { agent_key: agentKey } : {}),
       ...(pageContext ? { page_context: pageContext } : {}),
     },
   });
