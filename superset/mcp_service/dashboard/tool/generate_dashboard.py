@@ -214,6 +214,8 @@ def generate_dashboard(  # noqa: C901
       grid. A valid ``position_json`` replaces that grid for custom rows,
       header bands, or MARKDOWN/HEADER components. Invalid explicit layouts
       fall back to the auto-generated grid and return a warning.
+      Each component's ``parents`` is recomputed from its ``children`` edges
+      before saving, so an omitted or incomplete ``parents`` array is fine.
 
     Returns:
     - Dashboard ID and URL

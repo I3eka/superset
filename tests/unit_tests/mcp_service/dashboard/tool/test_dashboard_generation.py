@@ -898,6 +898,7 @@ class TestGenerateDashboard:
             result = await client.call_tool("generate_dashboard", {"request": request})
 
             assert result.structured_content["error"] is None
+            assert result.structured_content["warnings"] == []
             created = mock_dashboard_cls.return_value
             stored = json.loads(created.position_json)
             assert stored["CHART-1436"]["parents"] == [
@@ -1004,13 +1005,15 @@ class TestGenerateDashboard:
         malformed_layout = {
             "DASHBOARD_VERSION_KEY": "v2",
             # `children` is an int rather than a list of component ids.
-            "ROOT_ID": {"type": "ROOT", "children": 1},
+            "ROOT_ID": {"id": "ROOT_ID", "type": "ROOT", "children": 1},
             "GRID_ID": {
+                "id": "GRID_ID",
                 "type": "GRID",
                 "children": ["CHART-1436"],
                 "parents": ["ROOT_ID"],
             },
             "CHART-1436": {
+                "id": "CHART-1436",
                 "type": "CHART",
                 "children": [],
                 "meta": {"chartId": 1436},
@@ -1032,6 +1035,7 @@ class TestGenerateDashboard:
             assert stored["ROOT_ID"]["children"] == ["GRID_ID"]
             assert stored["GRID_ID"]["parents"] == ["ROOT_ID"]
             assert stored["CHART-1436"]["parents"][:2] == ["ROOT_ID", "GRID_ID"]
+            assert len(stored["CHART-1436"]["parents"]) == 4
             assert result.structured_content["warnings"] == [
                 "position_json was invalid; used an auto-generated layout."
             ]
