@@ -600,8 +600,8 @@ def test_get_event_bus_returns_a_redis_bus_configured_from_config(
     """
     Worker mode constructs the configured Redis backend, prefix and TTL.
 
-    Only stream I/O is replaced: mocking ``_stream_backend`` would conceal a
-    broken import or configuration path before the worker starts its turn.
+    Only stream I/O is replaced: mocking ``get_event_bus_backend`` would conceal
+    a broken import or configuration path before the worker starts its turn.
     """
     from superset.ai.eventbus import get_event_bus, RedisStreamEventBus
     from superset.ai.events import final_event
