@@ -1,0 +1,85 @@
+name: superset-native-ai
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-superset-common: &superset-common
+  image: local/superset-native-ai:master-db556ec6-native-ai
+  env_file:
+    - .env
+  environment:
+    SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+  volumes:
+    - ./config:/app/pythonpath:ro
+    - superset_home:/app/superset_home
+  logging: *default-logging
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+    restart: unless-stopped
+
+  superset-init:
+    <<: *superset-common
+    command: ["/app/docker/docker-init.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  superset:
+    <<: *superset-common
+    command: ["/app/docker/docker-bootstrap.sh", "app-gunicorn"]
+    ports:
+      - "127.0.0.1:8088:8088"
+      - "10.48.140.17:8088:8088"
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 30
+
+volumes:
+  postgres_data:
+    external: true
+    name: superset-vambery_postgres_data
+  redis_data:
+    external: true
+    name: superset-vambery_redis_data
+  superset_home:
+    external: true
+    name: superset-vambery_superset_home
