@@ -44,9 +44,10 @@ from superset.ai.events import (
     session_event,
     StreamEvent,
 )
-from superset.ai.llm.base import Message
+from superset.ai.llm.base import Message, ToolCall, ToolResult
 from superset.ai.telemetry import bind_run, current_run, start_run
 from superset.ai.types import MessageRole, MessageStatus, RunOutcome, StreamEventType
+from superset.utils import json
 from superset.utils.decorators import transaction
 
 logger = logging.getLogger(__name__)
@@ -429,20 +430,70 @@ def _build_history(messages: list[Any]) -> list[Message]:
         for message in messages
         if message.content and message.role != MessageRole.SYSTEM.value
     ]
-    window = usable[-max_messages:]
+    window = [
+        _replay_message(message, index)
+        for index, message in enumerate(usable[-max_messages:])
+    ]
 
     # Trimmed to the budget, but never to nothing: a single over-budget message
     # is still sent, because the provider's own error about it is more useful
     # than a request with no question in it.
-    total = sum(len(message.content) for message in window)
-    while len(window) > 1 and total > max_chars:
-        dropped = window.pop(0)
-        total -= len(dropped.content)
-
-    return [
-        Message(role=MessageRole(message.role), content=message.content)
-        for message in window
+    sizes = [
+        sum(
+            len(message.content)
+            + sum(
+                len(call.name) + len(json.dumps(call.arguments))
+                for call in message.tool_calls
+            )
+            + sum(len(result.content) for result in message.tool_results)
+            for message in turn
+        )
+        for turn in window
     ]
+    total = sum(sizes)
+    while len(window) > 1 and total > max_chars:
+        window.pop(0)
+        total -= sizes.pop(0)
+
+    return [message for turn in window for message in turn]
+
+
+def _replay_message(stored: Any, index: int) -> list[Message]:
+    """Restore recorded tool pairs before the answer, as one trimmable turn."""
+    messages: list[Message] = []
+    extra = getattr(stored, "extra", {})
+    calls = extra.get("tool_calls", []) if isinstance(extra, dict) else []
+    if stored.role == MessageRole.ASSISTANT.value and isinstance(calls, list):
+        for offset, call in enumerate(calls):
+            if not isinstance(call, dict) or not (
+                isinstance(call.get("name"), str)
+                and isinstance(call.get("arguments"), dict)
+                and isinstance(call.get("output"), str)
+                and isinstance(call.get("ok"), bool)
+            ):
+                continue
+            call_id = f"history_{index}_{offset}"
+            messages.extend(
+                [
+                    Message(
+                        role=MessageRole.ASSISTANT,
+                        tool_calls=[ToolCall(call_id, call["name"], call["arguments"])],
+                    ),
+                    Message(
+                        role=MessageRole.USER,
+                        tool_results=[
+                            ToolResult(
+                                call_id,
+                                "Recorded output excerpt (may be incomplete; "
+                                "not a fresh tool execution):\n" + call["output"],
+                                is_error=not call["ok"],
+                            )
+                        ],
+                    ),
+                ]
+            )
+    messages.append(Message(role=MessageRole(stored.role), content=stored.content))
+    return messages
 
 
 def _latest_question(history: list[Message]) -> str | None:

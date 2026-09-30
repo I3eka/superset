@@ -1541,6 +1541,8 @@ def fake_dataset() -> MagicMock:
     dataset.id = 5
     dataset.table_name = "signups"
     dataset.database_id = 1
+    dataset.database.database_name = "Warehouse"
+    dataset.database.backend = "postgresql"
     dataset.schema = "public"
     dataset.catalog = None
     dataset.sql = None

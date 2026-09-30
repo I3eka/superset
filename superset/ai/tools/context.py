@@ -198,6 +198,8 @@ def _dataset_summary(dataset: Any) -> dict[str, Any]:
         "id": dataset.id,
         "name": _untrusted(dataset.table_name),
         "database_id": dataset.database_id,
+        "database_name": _untrusted(dataset.database.database_name),
+        "dialect": dataset.database.backend,
         "schema": dataset.schema,
         "catalog": dataset.catalog,
         "is_virtual": bool(dataset.sql),

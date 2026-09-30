@@ -26,6 +26,74 @@ from __future__ import annotations
 from typing import Any
 
 
+def test_page_sources_follow_authorized_metadata_on_every_turn() -> None:
+    """Bindings ignore browser guesses, refresh, and retain multiple databases."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from superset.ai.page_context import render_page_context
+    from tests.unit_tests.ai.test_tools import (
+        denial,
+        fake_chart,
+        FIND_CHART,
+        FIND_DASHBOARD,
+    )
+
+    first, second, denied = fake_chart(792), fake_chart(793), fake_chart(794)
+    first.datasource.id, first.datasource.database_id = 641, 94
+    second.datasource.id, second.datasource.database_id = 642, 97
+    second.datasource.columns[0].type = "DATE"
+    charts = {chart.id: chart for chart in (first, second, denied)}
+    dashboard = SimpleNamespace(slices=list(charts.values()))
+    page = {
+        "pageType": "dashboard",
+        "dashboardContext": {
+            "id": 581,
+            "charts": [{"id": key} for key in (*charts, 999)],
+            "database_id": 123456,
+        },
+    }
+
+    def check_access(**kwargs: object) -> None:
+        if kwargs.get("chart") is denied:
+            raise denial("Access denied")
+
+    with (
+        patch(FIND_DASHBOARD, return_value=dashboard),
+        patch(FIND_CHART, side_effect=charts.get) as find_chart,
+        patch("superset.security_manager.raise_for_access", side_effect=check_access),
+    ):
+        rendered = render_page_context(page)
+        assert '"database_id": 94' in rendered
+        assert '"database_id": 97' in rendered
+        assert '"type": "DATE"' in rendered
+        assert "postgresql" in rendered
+        assert "123456" not in rendered
+        assert all(call.args[0] != 999 for call in find_chart.call_args_list)
+        assert '"chart_ids": [794]' not in rendered
+
+        first.datasource.database_id = 105
+        refreshed = render_page_context(page)
+        assert '"database_id": 105' in refreshed
+        assert '"database_id": 94' not in refreshed
+
+        explore = render_page_context(
+            {"pageType": "explore", "chartContext": {"chartId": 793}}
+        )
+        assert '"database_id": 97' in explore
+
+        second.datasource = first.datasource
+        shared = render_page_context(page)
+        assert shared.count('"database_id": 105') == 1
+        assert '"chart_ids": [792, 793]' in shared
+
+        with patch(
+            "superset.security_manager.raise_for_access",
+            side_effect=denial("Dashboard access revoked"),
+        ):
+            assert "Sources resolved" not in render_page_context(page)
+
+
 def test_no_context_renders_nothing() -> None:
     """An absent or useless payload appends nothing to the prompt."""
     from superset.ai.page_context import render_page_context

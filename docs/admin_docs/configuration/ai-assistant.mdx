@@ -56,6 +56,12 @@ endpoints return `403`.
 Conversations are stored in Superset's metadata database, so no extra
 infrastructure is needed for the default configuration.
 
+For dashboard and chart questions, each request resolves the chart's dataset,
+database, SQL dialect, schema and column types from Superset metadata using the
+user's access permissions. Follow-up messages retain recorded tool calls and
+output excerpts within the history budget. Excerpts can be incomplete or stale;
+the assistant can inspect the source again when it needs fresh results.
+
 ### Which roles get access
 
 `superset init` grants `can_read`/`can_write` on `AIAssistant` to **Admin** and

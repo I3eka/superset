@@ -190,6 +190,56 @@ def test_history_never_trims_below_one_message(
     assert len(history) == 1
 
 
+def test_history_replays_tool_results_and_trims_complete_turns(
+    app_context: None, mocker: MockerFixture
+) -> None:
+    """A follow-up keeps discovered sources and errors without orphaned results."""
+    from flask import current_app
+
+    from superset.ai.orchestrator import _build_history
+
+    answer = _stored("assistant", "The total is 12.")
+    answer.extra = {
+        "tool_calls": [
+            {
+                "name": "execute_sql",
+                "arguments": {"database_id": 81, "sql": "SELECT COUNT(*) FROM events"},
+                "ok": False,
+                "output": "No database with id 81 is available.",
+            },
+            {
+                "name": "get_chart_context",
+                "arguments": {"chart_id": 792},
+                "ok": True,
+                "output": '{"dataset":{"database_id":94,"columns":[',
+            },
+        ]
+    }
+    rows = [_stored("user", "Count events"), answer, _stored("user", "By month?")]
+    history = _build_history(rows)
+    calls = [call for message in history for call in message.tool_calls]
+    results = [result for message in history for result in message.tool_results]
+    assert [call.name for call in calls] == ["execute_sql", "get_chart_context"]
+    assert [result.call_id for result in results] == [call.id for call in calls]
+    assert len({call.id for call in calls}) == 2
+    assert results[0].is_error is True
+    assert results[1].is_error is False
+    assert '"database_id":94' in results[1].content
+    assert "excerpt" in results[1].content.lower()
+    assert [message.content for message in history if message.content] == [
+        "Count events",
+        "The total is 12.",
+        "By month?",
+    ]
+
+    # Arguments and tool outputs consume the same budget as visible text.
+    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_MAX_HISTORY_CHARS": 60})
+    trimmed = _build_history(rows)
+    assert [(message.role.value, message.content) for message in trimmed] == [
+        ("user", "By month?")
+    ]
+
+
 @pytest.mark.parametrize(
     ("result", "expected"),
     [
