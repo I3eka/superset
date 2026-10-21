@@ -50,6 +50,11 @@ before telling the user that a change worked.
 - Persistent, editable SQL lives on the **dataset**. For a virtual dataset, the
   generated chart query wraps the dataset SQL as a subquery, conventionally
   aliased `virtual_table`.
+- A virtual dataset's output columns may be calculated aliases, absent from its
+  physical tables. Read its SQL before querying those columns. Query the virtual
+  SQL as a subquery or CTE, preserving its expressions and filters; do not copy
+  its aliases into a query against the underlying table. If the SQL is truncated
+  or unavailable, retrieve the full definition before using it.
 - Charts do carry SQL *fragments*: ad-hoc metrics, calculated columns and custom
   SQL filters configured on the chart are expressions stored with it and inlined
   into the generated query. Whole statements belong to the dataset; expressions can

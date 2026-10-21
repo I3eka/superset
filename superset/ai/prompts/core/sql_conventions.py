@@ -51,14 +51,15 @@ Two very different layouts hide behind the same partition column:
   come out inflated by roughly the number of partitions scanned. The result looks
   entirely reasonable, which is why this must be settled before the query runs.
 
-Classify from documentation where it exists, otherwise with a cheap probe: row
-counts for the last two or three partitions. Counts of a similar order of
-magnitude mean snapshot; smaller counts that vary day to day mean append.
+Establish the row grain, keys and partition meaning from source documentation or
+dataset SQL. Use bounded probes to verify those definitions. Similar row counts
+do not distinguish snapshots from events. If the source semantics remain
+unknown, state the uncertainty and ask for the definition before aggregating.
 
-For a point-in-time question on a snapshot table, filter to a **single**
-partition -- the newest one that actually exists, discovered rather than assumed.
-For history across days, deduplicate on a stable key. State which semantics you
-assumed in your answer.
+For a point-in-time question on a snapshot table, select the snapshot appropriate
+to the requested date. Discover which snapshots exist. For history across days,
+preserve the observation date as part of the grain; deduplicating only on an
+entity key can erase real history. State the verified grain in your answer.
 
 Where the engine can list partition values as metadata, reading them that way is
 far cheaper than scanning the table to find them. Discover what this engine
@@ -66,8 +67,12 @@ offers from a tool rather than assuming a syntax: the facility exists nearly
 everywhere and is spelled differently in each place.
 
 ## Dates
-- Always constrain the partition column, and constrain it first, so the engine
-  prunes before it filters.
+- Translate the requested period into explicit boundaries before executing SQL.
+  Preserve those boundaries in follow-up and repair queries unless the user
+  changes them. A requested month must not silently become a whole year.
+- Distinguish the business date from the ingestion or partition date. Apply
+  partition filters only when their relationship to the requested period is
+  established and they do not exclude relevant records.
 - Never assume the current date's partition exists. Discover the newest one:
   partitions land late, and the newest partition of an event table is incomplete
   for as long as the day is still running.
@@ -79,14 +84,23 @@ everywhere and is spelled differently in each place.
   remembered date. Match the column's actual type -- a partition column is often
   a string, and comparing it to a date silently scans everything.
 - Say which timezone a reported window is in whenever a day boundary could
-  change the answer.
+  change the answer. Verify the source's date/time semantics; the date anchor's
+  timezone does not establish the timezone of stored values.
+
+## Metric definitions and SQL repairs
+- Resolve a business metric from its documented or saved definition. Do not
+  infer a formula from an abbreviation or a plausible column name.
+- Identify the grain, eligible population, numerator and denominator before
+  computing a ratio. Preserve the required population filters in each term.
+- Fixing a syntax or column error must retain the intended period, joins,
+  expressions and filters. Compare the repaired query to the original intent
+  before executing it. A query returning successfully does not validate its
+  business meaning.
 
 ## Keep the query legible
-- Prefer several small queries to one deep stack of CTEs. Around five levels of
-  nesting you can no longer tell which step is wrong, and independent queries run
-  concurrently where one large query does not.
-- Do not compute many time windows in a single scan over a large table. One small
-  query per window, issued together, prunes independently and finishes sooner.
+- Name intermediate steps so their grain and filters can be checked. Choose
+  query structure from the source and engine constraints, not an assumed
+  performance advantage of splitting or combining queries.
 - Keep an explicit row limit on anything exploratory.
 
 ## Sanity-check before reporting

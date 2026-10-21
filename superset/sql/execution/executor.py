@@ -1027,7 +1027,7 @@ class SQLExecutor:
 
         if query is not None:
             # A failed metadata flush must be rolled back before recording failure.
-            db.session.rollback()
+            db.session.rollback()  # pylint: disable=consider-using-transaction
             query.status = status.value
             query.error_message = error_message
             query.end_time = now_as_float()
