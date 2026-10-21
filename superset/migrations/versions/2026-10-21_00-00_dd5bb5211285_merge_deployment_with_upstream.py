@@ -17,19 +17,13 @@
 """Merge the deployment and Apache master migration heads.
 
 Revision ID: dd5bb5211285
-Revises: 1072de5ed955, 75fc91e420ab, d623a0cb6bb0, d7cecc48bd55, e4a7c2b9d1f3
+Revises: 75fc91e420ab, d623a0cb6bb0
 Create Date: 2026-10-21 00:00:00.000000
 
 """
 
 revision = "dd5bb5211285"
-down_revision = (
-    "1072de5ed955",
-    "75fc91e420ab",
-    "d623a0cb6bb0",
-    "d7cecc48bd55",
-    "e4a7c2b9d1f3",
-)
+down_revision = ("75fc91e420ab", "d623a0cb6bb0")
 
 
 def upgrade() -> None:

@@ -791,7 +791,11 @@ def test_execute_failure_finishes_query_record(
     mocker.patch.object(SQLExecutor, "_create_query_record", return_value=mock_query)
     mocker.patch.object(SQLExecutor, "_try_get_cached_result", return_value=None)
     mocker.patch.object(SQLExecutor, "_execute_statements", side_effect=errors[failure])
-    mocker.patch("superset.sql.execution.executor.now_as_float", return_value=1234000.0)
+    mocker.patch(
+        "superset.sql.execution.executor.now_as_float",
+        return_value=1234000.0,
+        create=True,
+    )
     expected_status = (
         QueryStatus.TIMED_OUT if failure == "timeout" else QueryStatus.FAILED
     )
