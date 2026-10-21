@@ -26,6 +26,10 @@ use **New Chat** to start another conversation. If the conversation list cannot
 be loaded or its initial conversation cannot be created, the panel shows the
 error and still lets you create a new conversation.
 
+Conversation ages show time since the last activity. The API includes an explicit
+UTC offset in conversation and message timestamps so browsers in different time
+zones interpret the same instant.
+
 ## Enabling it
 
 Enable the assistant and its chat host, and configure a provider.
