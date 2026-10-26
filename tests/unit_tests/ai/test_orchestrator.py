@@ -629,7 +629,6 @@ def test_completed_turn_keeps_streamed_reasoning_in_history(
         "superset.daos.ai.AIChatMessageDAO.find_for_thread",
         return_value=[_stored("user", "Question")],
     )
-    mocker.patch("superset.ai.orchestrator._mark_streaming")
     finalise = mocker.patch("superset.ai.orchestrator._finalise_message")
     events = list(
         _run(
