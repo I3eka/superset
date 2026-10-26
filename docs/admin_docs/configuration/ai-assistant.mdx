@@ -180,6 +180,7 @@ AI_AGENT_PROFILES = {
             "search_assets",
             "get_schema",
             "create_virtual_dataset",
+            "get_chart_type_schema",
             "generate_chart",
             "generate_dashboard",
         ],
@@ -211,6 +212,7 @@ assistant text is not reclassified as reasoning.
 | `get_chart_context` | Reads saved chart controls and dataset column expressions |
 | `get_dashboard_context` | Reads a dashboard's definition |
 | `create_virtual_dataset` | Saves a read-only SQL query as a chartable dataset; opt-in only |
+| `get_chart_type_schema` | Discovers chart configuration schemas and examples; opt-in only |
 | `generate_chart` | Previews or saves a native chart; opt-in only |
 | `generate_dashboard` | Creates a dashboard from saved chart IDs; opt-in only |
 
