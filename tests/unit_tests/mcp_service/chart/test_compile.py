@@ -1221,7 +1221,8 @@ def test_compile_chart_validation_failure_is_not_connection_error(
     ("message", "validation_failure", "expected_error_type"),
     [
         (
-            "(psycopg2.OperationalError) could not connect to server: Connection refused\n"
+            "(psycopg2.OperationalError) could not connect to server: "
+            "Connection refused\n"
             '\tIs the server running on host "db.example" (10.0.0.1) and accepting\n'
             "\tTCP/IP connections on port 5432?",
             False,
