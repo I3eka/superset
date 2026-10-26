@@ -49,6 +49,7 @@ from superset.ai.llm.base import (
     ToolResult,
 )
 from superset.ai.runtime.base import BaseAgentRuntime, RunRequest, RunResult
+from superset.ai.runtime.sql_deadline import warehouse_deadline
 from superset.ai.telemetry import (
     current_run,
     POLICY_DENIED,
@@ -100,6 +101,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
         #: Whether any answer text has already been sent as it was generated. The
         #: finished answer is only replayed in chunks when it has not.
         self._streamed_text = False
+        self._deadline = float("inf")
 
     @property
     def result(self) -> RunResult:
@@ -155,6 +157,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
         async generator cannot both yield events and return a value.
         """
         deadline = time.monotonic() + request.timeout_seconds
+        self._deadline = deadline
         conversation = list(request.messages)
 
         for turn in range(1, request.max_turns + 1):
@@ -180,7 +183,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
             ):
                 yield event
 
-            if self._finished or self._result.cancelled:
+            if self._finished or self._result.cancelled or self._result.timed_out:
                 return
 
         # Budget exhausted without the model choosing to stop.
@@ -244,8 +247,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
     ) -> AsyncIterator[StreamEvent]:
         """Execute this turn's tool calls, appending outcomes to ``results``."""
         for call in calls:
-            if self._cancelled(request):
-                self._result.cancelled = True
+            if self._should_stop(request, self._deadline):
                 return
 
             yield thinking_event(
@@ -254,6 +256,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
                 {"tool_name": call.name},
             )
             result, detail = self._invoke_tool(request, call)
+            self._should_stop(request, self._deadline)
             results.append(result)
             record = self._record_call(call, result, detail)
 
@@ -440,7 +443,8 @@ class MessagesApiRuntime(BaseAgentRuntime):
             )
 
         try:
-            result, detail, error_type = self._dispatch(request.tools, call)
+            with warehouse_deadline(self._deadline):
+                result, detail, error_type = self._dispatch(request.tools, call)
         except Exception as ex:  # pylint: disable=broad-except
             logger.exception("AI tool %s failed", call.name)
             # The model is told the tool failed but not why, for the same reason

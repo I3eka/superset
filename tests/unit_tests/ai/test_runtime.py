@@ -616,7 +616,6 @@ def test_provider_reasoning_before_a_tool_call_is_not_streamed_as_answer() -> No
     )
 
 
-
 def test_history_bounds_json_without_changing_the_model_result() -> None:
     from superset.utils import json
 
@@ -652,3 +651,107 @@ def test_history_marks_plain_text_error_truncation() -> None:
     assert record["error"] == record["output"]
     assert len(record["error"].encode("utf-8")) <= 2000
     assert "truncated" in record["error"]
+
+
+@pytest.mark.parametrize("cancellation", ["implicit", "explicit", "during_execute"])
+def test_deadline_cancels_an_active_query_and_skips_remaining_tools(
+    cancellation: str,
+    mocker: Any,
+) -> None:
+    import threading
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from flask import g
+
+    from superset.models.core import Database
+    from superset.sql.execution.cancellation import cancellable_cursor, cursor_scope
+
+    cancelled = threading.Event()
+    spec = SimpleNamespace(
+        has_implicit_cancel=lambda: cancellation == "implicit",
+        has_query_id_before_execute=cancellation == "explicit",
+        has_query_id_during_execute=cancellation == "during_execute",
+    )
+    original = MagicMock(spec=Database, id=17, db_engine_spec=spec)
+    reloaded = MagicMock(spec=Database, id=17, db_engine_spec=spec)
+    user = SimpleNamespace(id=7)
+    original_thread = threading.get_ident()
+    capture = mocker.patch(
+        "superset.ai.runtime.sql_deadline.capture_cancel_query_id",
+        side_effect=[None, "cancel-id"]
+        if cancellation == "during_execute"
+        else ["cancel-id"],
+    )
+    mocker.patch("superset.utils.core.get_user_id", return_value=7)
+    mocker.patch(
+        "superset.db.session.get",
+        side_effect=lambda model, _id: reloaded if model is Database else user,
+    )
+
+    def cancel(database: Any, handle: str, **kwargs: Any) -> bool:
+        assert database is reloaded
+        assert g.user is user
+        assert threading.get_ident() != original_thread
+        assert handle == "cancel-id"
+        assert kwargs == {"catalog": "catalog", "schema": "schema"}
+        cancelled.set()
+        return True
+
+    cancel_query = mocker.patch(
+        "superset.ai.runtime.sql_deadline.cancel_chart_query", side_effect=cancel
+    )
+    cursor = MagicMock()
+    cursor.cancel.side_effect = cancelled.set
+
+    class BlockingTools(StubTools):
+        def dispatch(self, call: ToolCall) -> ToolResult:
+            self.calls.append(call)
+            with cancellable_cursor(original, cursor, "catalog", "schema"):
+                assert cancelled.wait(2), "the query was never cancelled"
+            return ToolResult(call_id=call.id, content="late result")
+
+    tools = BlockingTools()
+    calls = (
+        ToolCall(id="c1", name="execute_sql", arguments={}),
+        ToolCall(id="c2", name="execute_sql", arguments={}),
+    )
+    provider = EchoProvider([ScriptedTurn(tool_calls=calls), ScriptedTurn(text="late")])
+    runtime = MessagesApiRuntime(provider)
+    _run(runtime, _request(tools=tools, timeout_seconds=0.1))
+    assert cancelled.is_set()
+    assert runtime.result.timed_out
+    assert [call.id for call in tools.calls] == ["c1"]
+    assert len(provider.requests) == 1
+    assert cursor_scope.get() is None
+    if cancellation == "implicit":
+        cursor.cancel.assert_called_once_with()
+        capture.assert_not_called()
+        cancel_query.assert_not_called()
+    else:
+        cancel_query.assert_called_once()
+
+
+def test_sql_timeout_can_shorten_but_never_extend_the_run_deadline() -> None:
+    from unittest.mock import patch
+
+    from superset.ai.runtime.sql_deadline import warehouse_deadline
+    from superset.exceptions import SupersetTimeoutException
+    from superset.sql.execution.cancellation import check_query_deadline, timeout_scope
+
+    with patch("superset.ai.runtime.sql_deadline.time.monotonic", return_value=100):
+        with warehouse_deadline(110):
+            owner_timeout = timeout_scope.get()
+            assert owner_timeout is not None
+            for seconds, elapsed in [(2, 103), (60, 111)]:
+                with (
+                    pytest.raises(SupersetTimeoutException),
+                    owner_timeout(seconds),
+                    patch(
+                        "superset.ai.runtime.sql_deadline.time.monotonic",
+                        return_value=elapsed,
+                    ),
+                ):
+                    check_query_deadline()
+            check_query_deadline()
+    assert timeout_scope.get() is None
