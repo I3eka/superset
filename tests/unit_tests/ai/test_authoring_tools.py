@@ -313,3 +313,25 @@ async def test_chart_type_schema_uses_flat_registered_tool_arguments() -> None:
     client.call_tool.assert_awaited_once_with(
         "get_chart_type_schema", {"chart_type": "xy", "include_examples": True}
     )
+
+
+def test_generate_chart_preserves_partial_preview_results() -> None:
+    response = {
+        "success": True,
+        "previews": {"table": {"columns": ["total"], "data": [[3]]}},
+        "preview_errors": {"ascii": {"message": "Preview rendering failed."}},
+        "form_data": {"viz_type": "big_number_total", "datasource": "1__table"},
+        "semantics": {"metric": "SUM(amount)"},
+        "capabilities": {"table": True},
+        "warnings": ["Some previews could not be generated."],
+    }
+    output = GenerateChartTool(caller=lambda _request: response).run(
+        dataset_id=1,
+        config={
+            "chart_type": "big_number",
+            "metric": {"name": "amount", "aggregate": "SUM"},
+        },
+    )
+    for key, value in response.items():
+        assert output.payload[key] == value
+    assert output.payload["success"] is True
