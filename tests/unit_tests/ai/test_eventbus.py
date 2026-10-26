@@ -434,6 +434,24 @@ def test_redis_bus_skips_malformed_entries() -> None:
     assert events == [final_event("the good one"), done_event(True)]
 
 
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_redis_bus_stops_at_a_terminal_event(index: int) -> None:
+    """Worker streams preserve the final done frame for every run outcome."""
+    from superset.ai.eventbus import RedisStreamEventBus
+    from superset.ai.events import assistant_delta_event
+
+    expected = _completion_events(index)
+
+    bus = RedisStreamEventBus(cache=FakeStreamCache())
+    for event in expected:
+        bus.publish("run-1", event)
+    bus.publish("run-1", assistant_delta_event("trailing"))
+
+    events = _drain(bus, "run-1", timeout_seconds=5.0)
+
+    assert events == expected
+
+
 def test_redis_bus_delivers_replacement_after_error_until_done() -> None:
     """An error cannot hide a following authoritative answer replacement."""
     from superset.ai.eventbus import RedisStreamEventBus
