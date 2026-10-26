@@ -17,12 +17,12 @@
 """merge integrated AI followups
 
 Revision ID: c261026b1f09
-Revises: dd5bb5211285, b261026a1f09
+Revises: dd5bb5211285, b261026a1f09, b7d6ce912f40
 Create Date: 2026-10-26 00:02:00
 """
 
 revision = "c261026b1f09"
-down_revision = ("dd5bb5211285", "b261026a1f09")
+down_revision = ("dd5bb5211285", "b261026a1f09", "b7d6ce912f40")
 
 
 def upgrade() -> None:
