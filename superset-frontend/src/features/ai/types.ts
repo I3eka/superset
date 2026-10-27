@@ -236,7 +236,6 @@ export interface AiMessage {
   content: string;
   status?: string;
   createdOn?: string;
-  status?: string;
   runId?: string;
   /** Persisted by the backend, which is what lets the activity survive a reload. */
   toolCalls: AiToolCall[];
@@ -443,7 +442,6 @@ export function parseMessage(
     content: readString(value, 'content') ?? '',
     status: readString(value, 'status'),
     createdOn: readString(value, 'created_on'),
-    status: readString(value, 'status'),
     runId: readString(extra, 'run_id'),
     toolCalls: readRecordArray(toolCallSource, 'tool_calls')
       .map(parseToolCall)

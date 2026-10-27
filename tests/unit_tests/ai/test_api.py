@@ -119,7 +119,9 @@ def test_conversation_timestamps_include_timezone(
     mocker.patch(
         "superset.daos.ai.AIChatMessageDAO.find_for_thread", return_value=[message]
     )
-    mocker.patch("superset.daos.ai.AIChatMessageDAO.counts_for_threads", return_value={})
+    mocker.patch(
+        "superset.daos.ai.AIChatMessageDAO.counts_for_threads", return_value={}
+    )
     mocker.patch(
         "superset.daos.ai.AIChatFeedbackDAO.find_verdicts_for_user", return_value={}
     )

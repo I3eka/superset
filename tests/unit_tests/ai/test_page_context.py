@@ -96,6 +96,7 @@ def test_page_sources_follow_authorized_metadata_on_every_turn() -> None:
         ):
             assert "Sources resolved" not in render_page_context(page)
 
+
 @pytest.mark.parametrize(
     "context",
     [

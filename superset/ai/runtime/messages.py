@@ -413,15 +413,14 @@ class MessagesApiRuntime(BaseAgentRuntime):
                     event = await self._await_provider(anext(stream))
                 except StopAsyncIteration:
                     break
-                if event.kind is StreamEventKind.TEXT:
-                    if event.text:
-                        if not text_parts and self._result.answer:
-                            self._result.answer += "\n\n"
-                            yield assistant_delta_event("\n\n")
-                        text_parts.append(event.text)
-                        self._result.answer += event.text
-                        self._streamed_text = True
-                        yield assistant_delta_event(event.text)
+                if event.kind is StreamEventKind.TEXT and event.text:
+                    if not text_parts and self._result.answer:
+                        self._result.answer += "\n\n"
+                        yield assistant_delta_event("\n\n")
+                    text_parts.append(event.text)
+                    self._result.answer += event.text
+                    self._streamed_text = True
+                    yield assistant_delta_event(event.text)
                 elif event.kind is StreamEventKind.THINKING:
                     thinking_parts.append(event.text)
                 elif event.kind is StreamEventKind.TOOL_USE and event.tool_call:
