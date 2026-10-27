@@ -597,20 +597,22 @@ SUPERSET_AI_LLM_API_KEY=your-token
 SUPERSET_AI_MODEL_DEFAULT=your-model-name
 ```
 
-Before starting the stack, add the optional provider dependency you need to
-`docker/requirements-local.txt`:
+Before starting the stack, add the matching provider dependency to
+`docker/requirements-local.txt`; the bootstrap installs it in each container.
+For the OpenAI-compatible provider:
 
 ```
 openai>=1.60.0,<2
 ```
 
+Then start the stack:
+
 ```bash
 docker compose up
 ```
 
-The assistant appears once both a URL and a key are present; with neither set the
-stack behaves exactly as it did before. If you add dependencies to an already
-running stack, restart the application containers so bootstrap installs them.
+The assistant is enabled once both a URL and a key are present. With neither set,
+the stack starts with the assistant disabled.
 
 The local stack also logs traces to the container output and, unlike the
 production default, includes prompts and SQL in them.
