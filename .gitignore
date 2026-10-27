@@ -145,3 +145,8 @@ PROJECT.md
 oxc-custom-build/
 *.code-workspace
 *.duckdb
+
+# Private deployment configuration and operational artifacts
+/deploy/
+/deployment-support/
+/audits/

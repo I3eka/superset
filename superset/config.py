@@ -3556,7 +3556,7 @@ AI_SYSTEM_PROMPT_MUTATOR: Callable[..., str] | None = None
 #   AI_TELEMETRY = [LoggingAITelemetry(), StatsLoggerAITelemetry()]
 #
 # To send traces to a hosted or self-hosted tracing product — Braintrust,
-# LangSmith, Langfuse, Arize Phoenix, an OpenTelemetry collector, or your own
+# LangSmith, Arize Phoenix, an OpenTelemetry collector, or your own
 # warehouse — subclass AITelemetry and add it to this list. Several sinks may be
 # configured at once; each is called independently and one failing does not
 # affect the others or the run.

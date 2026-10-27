@@ -456,7 +456,7 @@ supported output and context limits; a higher cap can increase latency and cost.
 Superset bundles **no integration with any AI monitoring product**. Instead it
 exposes a small sink interface, `AITelemetry`, and calls it once per run, once
 per model round trip and once per tool call. Whatever you already use —
-Braintrust, LangSmith, Langfuse, Arize Phoenix, an OpenTelemetry collector, a
+Braintrust, LangSmith, Arize Phoenix, an OpenTelemetry collector, a
 self-hosted alternative, or a table in your own warehouse — you connect by
 implementing that interface and listing it in `AI_TELEMETRY`.
 
