@@ -9101,9 +9101,6 @@ msgstr ""
 msgid "Loading"
 msgstr ""
 
-msgid "Loading chart data..."
-msgstr ""
-
 msgid "Loading chart preview..."
 msgstr ""
 
@@ -19897,23 +19894,14 @@ msgstr[1] ""
 msgid "№"
 msgstr ""
 
-#, python-format
-msgid ""
-"The selected %(type)s are used by %(charts)s. Archiving them will make "
-"dependent charts unavailable until they are recovered."
-msgstr ""
-
-#, python-format
-msgid ""
-"This %(type)s is used by %(charts)s. Archiving it will make dependent charts"
-" unavailable until it is recovered."
-msgstr ""
-
 msgid "View in Recently Archived →"
 msgstr ""
 
-#, python-format
-msgid ""
-"This %(schedule)s executes as another user. Only admins can change its content; set "
-"the Run As field to your own account to make this change."
+msgid "A new assistant response is ready."
+msgstr ""
+
+msgid "Assistant updates"
+msgstr ""
+
+msgid "Conversation"
 msgstr ""
