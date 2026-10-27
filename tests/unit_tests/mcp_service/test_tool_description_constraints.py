@@ -236,7 +236,7 @@ SUMMARY_DOCSTRING_CONSTRAINTS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
         ("use add_chart_to_existing_dashboard", ("add_chart_to_existing_dashboard",)),
         ("Never use this tool as a fallback", ("Never use as a fallback",)),
         ("must exist and be accessible", ("exist", "accessible")),
-        ("A valid ``position_json`` replaces that grid", ("position_json",)),
+        ("When ``position_json`` is supplied", ("position_json",)),
     ],
 }
 
@@ -431,7 +431,7 @@ SCHEMA_DOCSTRING_CONSTRAINTS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
         ),
     ],
     "generate_dashboard": [
-        ("auto-generated 2-column grid", ("auto-generated packed grid",)),
+        ("auto-generated 2-column grid", ("auto-generated 2-column grid",)),
         ("MARKDOWN/HEADER components", ("MARKDOWN", "HEADER components")),
         (
             "``parents`` is recomputed from its ``children`` edges",

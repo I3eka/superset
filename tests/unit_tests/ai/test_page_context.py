@@ -36,6 +36,7 @@ def test_page_sources_follow_authorized_metadata_on_every_turn() -> None:
 
     from superset.ai.page_context import render_page_context
     from tests.unit_tests.ai.test_tools import (
+        CAN_ACCESS,
         denial,
         fake_chart,
         FIND_CHART,
@@ -62,6 +63,7 @@ def test_page_sources_follow_authorized_metadata_on_every_turn() -> None:
             raise denial("Access denied")
 
     with (
+        patch(CAN_ACCESS, return_value=True),
         patch(FIND_DASHBOARD, return_value=dashboard),
         patch(FIND_CHART, side_effect=charts.get) as find_chart,
         patch("superset.security_manager.raise_for_access", side_effect=check_access),
