@@ -92,6 +92,8 @@ class TurnRequest:
     #: which is the only party that knows which tab is open, what is typed in
     #: the editor and which filters are applied.
     page_context: dict[str, Any] | None = None
+    #: Delivery that won the execution claim, assigned by the Celery worker.
+    worker_task_id: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         """Serialise for the task broker."""
@@ -103,6 +105,7 @@ class TurnRequest:
             "profile_key": self.profile_key,
             "model": self.model,
             "page_context": self.page_context,
+            "worker_task_id": self.worker_task_id,
         }
 
     @classmethod
@@ -164,7 +167,7 @@ def request_cancel(run_id: str) -> None:
     try:
         store = _cancel_store(worker_mode)
         if worker_mode:
-            store.set(f"{_CANCEL_PREFIX}{run_id}", True, ex=_CANCEL_TTL_SECONDS)
+            store.set(f"{_CANCEL_PREFIX}{run_id}", b"1", ex=_CANCEL_TTL_SECONDS)
         else:
             store.set(f"{_CANCEL_PREFIX}{run_id}", True, timeout=_CANCEL_TTL_SECONDS)
     except Exception:  # pylint: disable=broad-except
@@ -208,7 +211,7 @@ def stream_turn(request: TurnRequest) -> Generator[StreamEvent, None, None]:
     A database claim failure raises without rewriting the shared message: the
     caller has not established ownership of its execution.
     """
-    if not _claim_pending(request.assistant_message_uuid):
+    if not _claim_pending(request.assistant_message_uuid, request.worker_task_id):
         logger.info("AI message %s is already claimed", request.assistant_message_uuid)
         return
 
@@ -315,15 +318,25 @@ def _run(request: TurnRequest, state: dict[str, Any]) -> Iterator[StreamEvent]:
 
     yield session_event(request.thread_uuid, request.assistant_message_uuid)
 
-    from superset.ai.page_context import render_page_context
+    from superset.ai.page_context import render_helper_directives, render_page_context
 
-    history = _build_history(AIChatMessageDAO.find_for_thread(thread))
+    messages = AIChatMessageDAO.find_for_thread(thread)
+    for index, message in enumerate(messages):
+        if str(message.uuid) == request.assistant_message_uuid:
+            history = _build_history(messages[:index])
+            break
+    else:
+        raise ValueError("The assistant message is not in this conversation.")
     # Recorded as well as prompted with, so the transcript can show what the
     # assistant was told about the user's screen. An answer that looks wrong is
     # usually an answer to a different question than the reader assumed, and the
     # page context is where that difference lives.
     rendered_context = render_page_context(request.page_context)
-    state["page_context"] = rendered_context
+    directives = render_helper_directives(request.page_context)
+    recorded_context = "\n\n".join(
+        section for section in (rendered_context, directives) if section
+    )
+    state["page_context"] = recorded_context
     system_prompt = _build_system_prompt(tools, rendered_context)
     pinned_model = request.model or profile.model
     model = _resolved_model(provider, pinned_model, profile)
@@ -333,6 +346,9 @@ def _run(request: TurnRequest, state: dict[str, Any]) -> Iterator[StreamEvent]:
         model=model,
         question=_latest_question(history),
     )
+    if directives:
+        # Browser helpers have user authority; the actual question stays last.
+        history.insert(len(history) - 1, Message(MessageRole.USER, directives))
 
     run_request = RunRequest(
         messages=history,
@@ -375,7 +391,7 @@ def _run(request: TurnRequest, state: dict[str, Any]) -> Iterator[StreamEvent]:
             "tool_calls": result.tool_calls,
             "thoughts": result.thoughts,
             "turns": result.turns,
-            **_recorded_context(rendered_context),
+            **_recorded_context(recorded_context),
         },
     )
 
@@ -392,7 +408,7 @@ def _run(request: TurnRequest, state: dict[str, Any]) -> Iterator[StreamEvent]:
     yield done_event(ok=outcome is RunOutcome.SUCCESS)
 
 
-def _drain(source: AsyncIterator[StreamEvent]) -> Iterator[StreamEvent]:
+def _drain(source: AsyncIterator[StreamEvent]) -> Generator[StreamEvent, None, None]:
     """
     Pull an async iterator one item at a time from a synchronous caller.
 
@@ -400,16 +416,20 @@ def _drain(source: AsyncIterator[StreamEvent]) -> Iterator[StreamEvent]:
     ``__anext__``, so each event reaches the client as it is produced rather
     than after the run completes.
     """
+    iterator = source.__aiter__()
     loop = asyncio.new_event_loop()
     try:
-        iterator = source.__aiter__()
         while True:
             try:
                 yield loop.run_until_complete(iterator.__anext__())
             except StopAsyncIteration:
                 return
     finally:
-        loop.close()
+        try:
+            if close := getattr(iterator, "aclose", None):
+                loop.run_until_complete(close())
+        finally:
+            loop.close()
 
 
 def _build_history(messages: list[Any]) -> list[Message]:
@@ -535,11 +555,11 @@ def _build_system_prompt(tools: Any, rendered_context: str) -> str:
 
 
 @transaction()
-def _claim_pending(message_uuid: str) -> bool:
+def _claim_pending(message_uuid: str, worker_task_id: str | None = None) -> bool:
     """Claim a placeholder once, before any inference can start."""
     from superset.daos.ai import AIChatMessageDAO
 
-    return AIChatMessageDAO.claim_pending(message_uuid)
+    return AIChatMessageDAO.claim_pending(message_uuid, worker_task_id=worker_task_id)
 
 
 def _finalise_message(

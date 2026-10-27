@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from superset.ai.types import MessageExtra, MessageRole, MessageStatus, ThreadStatus
@@ -74,6 +74,8 @@ class AIChatThreadDAO(BaseDAO[AIChatThread]):
         cls,
         thread_uuid: str | UUID,
         user_id: int | None,
+        *,
+        for_update: bool = False,
     ) -> AIChatThread | None:
         """
         Return the thread only when ``user_id`` owns it.
@@ -92,14 +94,13 @@ class AIChatThreadDAO(BaseDAO[AIChatThread]):
         if parsed is None or user_id is None:
             return None
 
-        return (
-            db.session.query(AIChatThread)
-            .filter(
-                AIChatThread.uuid == parsed,
-                AIChatThread.created_by_fk == user_id,
-            )
-            .one_or_none()
+        query = db.session.query(AIChatThread).filter(
+            AIChatThread.uuid == parsed,
+            AIChatThread.created_by_fk == user_id,
         )
+        if for_update:
+            query = query.with_for_update()
+        return query.one_or_none()
 
     @classmethod
     def find_all_for_user(
@@ -223,6 +224,34 @@ class AIChatMessageDAO(BaseDAO[AIChatMessage]):
     """
 
     @classmethod
+    def has_active_run(cls, thread: AIChatThread) -> bool:
+        """Check run state without hydrating message contents."""
+        return (
+            db.session.query(AIChatMessage.id)
+            .filter(
+                AIChatMessage.thread_id == thread.id,
+                AIChatMessage.role == MessageRole.ASSISTANT.value,
+                AIChatMessage.status.in_(
+                    [MessageStatus.PENDING.value, MessageStatus.STREAMING.value]
+                ),
+            )
+            .first()
+            is not None
+        )
+
+    @classmethod
+    def counts_for_threads(cls, threads: list[AIChatThread]) -> dict[int, int]:
+        """Count messages for an owned thread page without loading messages."""
+        if not threads:
+            return {}
+        return dict(
+            db.session.query(AIChatMessage.thread_id, func.count(AIChatMessage.id))
+            .filter(AIChatMessage.thread_id.in_([thread.id for thread in threads]))
+            .group_by(AIChatMessage.thread_id)
+            .all()
+        )
+
+    @classmethod
     def find_for_thread(cls, thread: AIChatThread) -> list[AIChatMessage]:
         """
         Return a thread's messages in conversation order.
@@ -238,11 +267,25 @@ class AIChatMessageDAO(BaseDAO[AIChatMessage]):
         )
 
     @classmethod
-    def claim_pending(cls, message_uuid: str | UUID) -> bool:
+    def claim_pending(
+        cls, message_uuid: str | UUID, *, worker_task_id: str | None = None
+    ) -> bool:
         """Atomically move one pending assistant message into execution."""
         parsed = _coerce_uuid(message_uuid)
         if parsed is None:
             return False
+        updates: dict[str, Any] = {"status": MessageStatus.STREAMING.value}
+        if worker_task_id is not None:
+            from superset.utils import json
+
+            message = (
+                db.session.query(AIChatMessage).filter_by(uuid=parsed).one_or_none()
+            )
+            if message is None:
+                return False
+            updates["extra_json"] = json.dumps(
+                {**message.extra, "worker_task_id": worker_task_id}
+            )
         return (
             db.session.query(AIChatMessage)
             .filter(
@@ -251,7 +294,7 @@ class AIChatMessageDAO(BaseDAO[AIChatMessage]):
                 AIChatMessage.status == MessageStatus.PENDING.value,
             )
             .update(
-                {AIChatMessage.status: MessageStatus.STREAMING.value},
+                updates,
                 synchronize_session=False,
             )
             == 1

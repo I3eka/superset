@@ -30,6 +30,17 @@ Conversation ages show time since the last activity. The API includes an explici
 UTC offset in conversation and message timestamps so browsers in different time
 zones interpret the same instant.
 
+A conversation with a pending or streaming run cannot be deleted. Stop the run
+and wait for its terminal status, or let it finish, before deleting it. Closing
+or docking the panel aborts its streams, releases confirmation checkpoints and
+requests cancellation. Reopening refreshes any run that has not finished yet.
+Cancellation remains cooperative; a timed-out authoring operation may still
+complete, so check the created assets before retrying it.
+
+Chart previews use the shared chart loader, including its asynchronous query
+handling. A successful zero-row result finishes as an empty chart. Configuration
+retries and requests are cancelled when the preview is removed or changed.
+
 ## Enabling it
 
 Enable the assistant and its chat host, and configure a provider.
@@ -62,6 +73,11 @@ Run `superset db upgrade` to create the conversation tables, then `superset init
 to create and assign the assistant's permissions. Without the latter the
 endpoints return `403`.
 
+The published OpenAPI artifact describes the default deployment, where this
+feature is disabled. With `AI_ASSISTANT` and `FAB_API_SWAGGER_UI` enabled, the deployment's
+`/api/v1/_openapi` specification includes the AI routes. Generate clients from
+that specification rather than adding optional routes to the default artifact.
+
 Conversations are stored in Superset's metadata database, so no extra
 infrastructure is needed for the default configuration.
 
@@ -92,6 +108,10 @@ well, because a cursor deadline cannot interrupt connection establishment.
 profiles remain read-only; an operator who enables asset-authoring tools must
 also gate that profile, and each tool enforces the current user's normal asset
 and dataset permissions.
+
+Asset readers additionally require `can_read` on their REST resource:
+`Chart`, `Dashboard`, `Dataset` for asset searches, and `Database` for
+database/schema discovery. Object and datasource access checks still apply.
 
 **Gamma does not get it by default.** The assistant runs queries and costs
 money per question, so it is granted deliberately rather than inherited. To
@@ -303,8 +323,12 @@ usable connection.
 
 A turn is deliberately **not** retried after a worker crash: inference costs
 money, and re-running a turn the user may already have partly seen would charge
-twice. A hard-killed worker can leave a non-terminal message; stale-run recovery
-is not automatic.
+twice. The task explicitly uses early acknowledgement. When Celery observes a
+child failure or hard time limit, its parent records an error and publishes the
+terminal stream events. Only the delivery that claimed a running message can
+finalize it; a failed duplicate cannot overwrite another delivery's result.
+Losing the entire Celery parent or host cannot run these callbacks; automatic
+reconciliation of that outage is not provided.
 
 Retry a failed message submission with the same `request_id`. The assistant
 keeps the original run identifier and its accepted context. An unclaimed run
@@ -346,6 +370,11 @@ escaped, and context limits retain complete frames. Validated page types and
 object IDs remain usable as tool arguments. This framing guides the model; it
 does not replace the permission checks on tool execution.
 
+Message and suggestion requests accept at most 100,000 bytes of compact,
+ASCII-escaped JSON in `page_context`, with at most 20 nested objects or arrays.
+These limits include fields that are not rendered in the prompt. Invalid context
+is rejected before saving a message or starting a run.
+
 ### Cancellation
 
 Cancellation requires the run identifier returned when submitting the message
@@ -355,6 +384,10 @@ conversation returns `404` without recording a cancellation request.
 Cancellation is cooperative: a run stops at its next step boundary. A run inside
 a single long model call or a single long query will not stop until that call
 returns.
+
+Checkpoint controls apply to the selected conversation. If Stop is pressed while
+the start request is pending, the client forwards cancellation as soon as the
+server returns the run identifier.
 
 ## Incomplete answers
 
@@ -517,10 +550,12 @@ A third-party server is untrusted input, and possibly untrusted intent:
 - **No Superset credential is ever forwarded.** Only the headers you configured
   for that server are sent — never the user's session cookie, CSRF token, or an
   inbound authorization header.
-- **SQL execution through a foreign server is refused by default.** Superset's
-  read-only enforcement and per-dataset authorization cannot apply to a query
-  another system runs, so allowing it would silently bypass both. Set
-  `AI_AGENT_MCP_DENY_FOREIGN_SQL = False` to accept that trade deliberately.
+- **External tools require an explicit per-server `tool_allowlist`.** Names,
+  argument schemas, and remote read-only annotations cannot establish that a
+  tool respects Superset's data permissions. Audit each listed tool and the
+  credentials its server uses; the server's denylist still takes precedence.
+  `AI_AGENT_MCP_DENY_FOREIGN_SQL = False` disables this additional guard for
+  deployments that deliberately delegate authorization to their remote servers.
 - **Results obey the same size cap** as built-in tools, and the cap is applied
   while reading, so a hostile server cannot exhaust memory before truncation.
 - **A server being down does not break the assistant.** Discovery failure means
@@ -539,7 +574,7 @@ the run, so it remains available when a conversation is reloaded.
 Conversations are kept for `AI_ASSISTANT_MESSAGE_RETENTION_DAYS` (default 30).
 The default Celery configuration registers `ai.prune_conversations` daily at
 03:30. Run Celery beat to enforce it; if you replace `CELERY_CONFIG`, keep both
-the `superset.ai.tasks` import and that beat entry. Set the retention to `0` to
+the `superset.ai.tasks` import and that beat entry. Set the retention to zero or a negative value to
 disable pruning.
 
 ## Trying it locally
@@ -606,7 +641,6 @@ production default, includes prompts and SQL in them.
 | `AI_EXTRA_PROMPT_SECTIONS` | `[]` | Append prompt sections. |
 | `AI_DISABLED_PROMPT_SECTIONS` | `[]` | Drop shipped sections by key. |
 | `AI_SYSTEM_PROMPT_MUTATOR` | `None` | Last-mile prompt hook. |
-| `AI_KNOWLEDGE_PROVIDERS` | `[]` | Deployment domain knowledge. |
 | `AI_SUGGESTED_PROMPTS_ENABLED` | `False` | Generate opening-question suggestions with the provider. |
 | `AI_SUGGESTED_PROMPTS_COUNT` | `3` | Number of suggested questions. |
 | `AI_SUGGESTED_PROMPTS_MODEL_ALIAS` | `"fast"` | Model tier for suggestions. |
@@ -614,7 +648,7 @@ production default, includes prompts and SQL in them.
 | `AI_SUGGESTED_PROMPTS_MAX_TOKENS` | `300` | Output token budget for suggestions. |
 | `AI_SUGGESTED_PROMPTS_PROMPT` | `None` | Replace the suggestion prompt; supports `{count}` and `{max_chars}`. |
 | `AI_AGENT_MCP_SERVERS` | `{}` | External MCP servers to attach. |
-| `AI_AGENT_MCP_DENY_FOREIGN_SQL` | `True` | Refuse SQL execution via a foreign server. |
+| `AI_AGENT_MCP_DENY_FOREIGN_SQL` | `True` | Require explicit per-server tool allowlists; remote execution cannot enforce Superset permissions. |
 | `AI_TELEMETRY` | `[]` | Telemetry sinks, as instances or dotted paths. |
 | `AI_TELEMETRY_REDACT_CONTENT` | `True` | Withhold prompts, answers, SQL and data from telemetry. |
 | `AI_TELEMETRY_MAX_CONTENT_CHARS` | `10000` | Cap per content field when redaction is off. |

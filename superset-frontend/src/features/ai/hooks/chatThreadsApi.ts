@@ -142,6 +142,8 @@ export const messageToChatMessage = (
       message.role === 'assistant' && message.status === 'error'
         ? `${message.content}\n\n---\n_${t('The assistant did not finish this run.')}_`
         : message.content,
+    status: message.status,
+    runId: message.runId,
     timestamp: message.createdOn
       ? new Date(message.createdOn).getTime()
       : Date.now(),

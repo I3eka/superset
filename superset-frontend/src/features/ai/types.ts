@@ -51,6 +51,9 @@ export interface ChatMessageWithMeta {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** Persisted lifecycle, retained so an accepted run can survive a reload. */
+  status?: string;
+  runId?: string;
   /** Reasoning and the tool log as one block, for the flat rendering used while
    * a run is streaming and there are no structured steps yet. */
   thinking?: string;
@@ -116,7 +119,7 @@ export interface CheckpointPayload {
 export interface AIActionPayload {
   /** Sent as the user's message. */
   prompt: string;
-  /** Prepended to the conversation as a system directive. */
+  /** Additional user instructions; cannot override operator policies. */
   systemPrompt?: string;
   /** Name for the conversation the action opens. */
   tabName?: string;
@@ -233,6 +236,8 @@ export interface AiMessage {
   content: string;
   status?: string;
   createdOn?: string;
+  status?: string;
+  runId?: string;
   /** Persisted by the backend, which is what lets the activity survive a reload. */
   toolCalls: AiToolCall[];
   /** Model reasoning. Never rendered as part of the answer. */
@@ -438,6 +443,8 @@ export function parseMessage(
     content: readString(value, 'content') ?? '',
     status: readString(value, 'status'),
     createdOn: readString(value, 'created_on'),
+    status: readString(value, 'status'),
+    runId: readString(extra, 'run_id'),
     toolCalls: readRecordArray(toolCallSource, 'tool_calls')
       .map(parseToolCall)
       .filter(isDefined),

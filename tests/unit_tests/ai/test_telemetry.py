@@ -34,6 +34,7 @@ from superset.ai.events import StreamEvent
 from superset.ai.llm.base import (
     LLMTransportError,
     Message,
+    RetryPolicy,
     ToolCall,
     ToolDefinition,
     ToolResult,
@@ -388,6 +389,9 @@ def test_redaction_hides_provider_error_text(
     _configure(mocker, [sink], redact=True)
 
     provider = EchoProvider([ScriptedTurn(error=LLMTransportError(f"rejected {SQL}"))])
+    mocker.patch.object(
+        provider, "retry_policy", return_value=RetryPolicy(max_attempts=1)
+    )
     _drive(provider)
 
     assert sink.errors
@@ -698,7 +702,11 @@ def test_a_failed_round_trip_is_a_span_and_an_error(
     sink = CapturingTelemetry()
     _configure(mocker, [sink])
 
-    _drive(EchoProvider([ScriptedTurn(error=LLMTransportError("upstream 503"))]))
+    provider = EchoProvider([ScriptedTurn(error=LLMTransportError("upstream 503"))])
+    mocker.patch.object(
+        provider, "retry_policy", return_value=RetryPolicy(max_attempts=1)
+    )
+    _drive(provider)
 
     assert sink.model_calls[0][1].error_type == "LLMTransportError"
     assert sink.runs_ended[0].error_type == "LLMTransportError"
@@ -937,7 +945,10 @@ def test_orchestrated_model_matches_provider_and_audit_trail(
     )
     mocker.patch(
         "superset.daos.ai.AIChatMessageDAO.find_for_thread",
-        return_value=[SimpleNamespace(role="user", content=QUESTION)],
+        return_value=[
+            SimpleNamespace(uuid="question", role="user", content=QUESTION),
+            SimpleNamespace(uuid="m", role="assistant", content=""),
+        ],
     )
     finalise = mocker.patch("superset.ai.orchestrator._finalise_message")
     mocker.patch("superset.ai.eventbus.get_event_bus")

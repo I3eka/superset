@@ -71,6 +71,39 @@ def conversation(
     return f"/api/v1/ai/thread/{response.json['result']['uuid']}"
 
 
+def test_worker_transport_failure_is_not_accepted_and_can_retry(
+    client: FlaskClient,
+    conversation: str,
+    session: Session,
+    mocker: MockerFixture,
+) -> None:
+    from flask import current_app
+
+    from superset.ai.eventbus import MemoryEventBus
+    from superset.ai.tasks import run_turn
+    from superset.models.ai import AIChatMessage
+
+    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_EXECUTION_MODE": "worker"})
+    bus = mocker.patch(
+        "superset.ai.eventbus.get_event_bus",
+        side_effect=RuntimeError("connection check failed"),
+    )
+    delay = mocker.patch.object(run_turn, "delay")
+
+    assert _post(client, conversation).status_code == 500
+    delay.assert_not_called()
+    assistant = session.query(AIChatMessage).filter_by(role="assistant").one()
+    run_id = assistant.extra["run_id"]
+
+    bus.side_effect = None
+    bus.return_value = MemoryEventBus()
+    retry = _post(client, conversation)
+    assert retry.status_code == 202
+    assert retry.json["result"]["run_id"] == run_id
+    assert session.query(AIChatMessage).count() == 2
+    delay.assert_called_once()
+
+
 def _post(client: FlaskClient, conversation: str, **updates: Any) -> Any:
     """Submit the same idempotency key unless a test overrides it."""
     return client.post(
@@ -129,6 +162,106 @@ def test_post_replay_keeps_run_and_accepted_context(
         assert call.args[0].model == "first-model"
         assert call.args[0].profile_key == "first-agent"
         assert call.args[0].page_context == context
+
+
+@pytest.mark.parametrize("mode", ["inline", "worker"])
+def test_helper_directives_reach_the_provider_as_user_instructions(
+    client: FlaskClient,
+    session: Session,
+    mocker: MockerFixture,
+    conversation: str,
+    provider: EchoProvider,
+    mode: str,
+) -> None:
+    """Browser helpers guide the turn without becoming operator instructions."""
+    from superset.ai.orchestrator import execute_turn
+    from superset.models.ai import AIChatMessage
+
+    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_EXECUTION_MODE": mode})
+    submitted = mocker.patch("superset.ai.tasks.submit_turn")
+    result = _post(
+        client,
+        conversation,
+        page_context={"helper_directives": ["Be terse", "Use bullet points"]},
+    ).json["result"]
+    if mode == "worker":
+        execute_turn(submitted.call_args.args[0])
+    else:
+        client.get(f"{conversation}/stream?run_id={result['run_id']}").get_data()
+
+    request = provider.requests[0]
+    user_messages = [m.content for m in request.messages if m.role.value == "user"]
+    assert len(user_messages) == 2
+    assert "Be terse" in user_messages[0]
+    assert "Use bullet points" in user_messages[0]
+    assert user_messages[-1] == "one question"
+    assert "Be terse" not in request.system
+    session.expire_all()
+    assistant = session.query(AIChatMessage).filter_by(role="assistant").one()
+    assert "Be terse" in assistant.extra["page_context"]
+
+
+@pytest.mark.parametrize("reversed_delivery", [False, True])
+def test_queued_turn_history_stops_at_its_own_placeholder(
+    client: FlaskClient,
+    session: Session,
+    mocker: MockerFixture,
+    conversation: str,
+    provider: EchoProvider,
+    reversed_delivery: bool,
+) -> None:
+    """Queueing a later question cannot change the answer to an earlier one."""
+    from superset.ai.orchestrator import execute_turn
+    from superset.models.ai import AIChatMessage
+
+    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_EXECUTION_MODE": "worker"})
+    submitted = mocker.patch("superset.ai.tasks.submit_turn")
+    for key in ("first", "second"):
+        response = _post(
+            client, conversation, content=f"{key} question", request_id=key
+        )
+        assert response.status_code == 202
+    deliveries = [call.args[0] for call in submitted.call_args_list]
+    if reversed_delivery:
+        deliveries.reverse()
+    for turn in deliveries:
+        execute_turn(turn)
+
+    session.expire_all()
+    answers = {
+        message.request_id: message.content
+        for message in session.query(AIChatMessage).filter_by(role="assistant")
+    }
+    assert answers == {
+        "first": "echo: first question",
+        "second": "echo: second question",
+    }
+    first_request = provider.requests[1 if reversed_delivery else 0]
+    assert [message.content for message in first_request.messages] == ["first question"]
+
+
+def test_missing_history_boundary_does_not_run_inference(
+    client: FlaskClient,
+    session: Session,
+    mocker: MockerFixture,
+    conversation: str,
+    provider: EchoProvider,
+) -> None:
+    """An unavailable placeholder must not fall back to the whole conversation."""
+    from superset.ai.orchestrator import execute_turn
+    from superset.models.ai import AIChatMessage
+
+    mocker.patch.dict(current_app.config, {"AI_ASSISTANT_EXECUTION_MODE": "worker"})
+    submitted = mocker.patch("superset.ai.tasks.submit_turn")
+    assert _post(client, conversation).status_code == 202
+    mocker.patch("superset.daos.ai.AIChatMessageDAO.find_for_thread", return_value=[])
+    execute_turn(submitted.call_args.args[0])
+
+    assert provider.requests == []
+    session.expire_all()
+    assert (
+        session.query(AIChatMessage).filter_by(role="assistant").one().status == "error"
+    )
 
 
 def test_assistant_commit_already_has_its_run_context(
@@ -467,10 +600,12 @@ def test_claim_database_error_does_not_finalize_someone_elses_run(
     )
 
 
+@pytest.mark.parametrize("worker_mode", [False, True])
 def test_two_database_sessions_can_only_claim_once(
     app: Any,
     tmp_path: Path,
     mocker: MockerFixture,
+    worker_mode: bool,
 ) -> None:
     """Competing database connections exercise the conditional UPDATE itself."""
     from sqlalchemy import create_engine
@@ -494,22 +629,25 @@ def test_two_database_sessions_can_only_claim_once(
     sessions.remove()
     barrier = Barrier(2)
 
-    def claim() -> bool:
+    def claim(delivery_id: str) -> bool:
         """Use a separate session and Flask context for each contender."""
         with app.app_context():
             try:
                 barrier.wait(timeout=10)
-                return _claim_pending(message_uuid)
+                return _claim_pending(
+                    message_uuid, delivery_id if worker_mode else None
+                )
             finally:
                 sessions.remove()
 
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results = [pool.submit(claim) for _ in range(2)]
-            assert sorted(result.result(timeout=15) for result in results) == [
-                False,
-                True,
-            ]
+            results = [pool.submit(claim, str(index)) for index in range(2)]
+            claimed = [result.result(timeout=15) for result in results]
+            assert sorted(claimed) == [False, True]
+            if worker_mode:
+                stored = sessions.query(AIChatMessage).one()
+                assert stored.extra["worker_task_id"] == str(claimed.index(True))
     finally:
         sessions.remove()
         engine.dispose()

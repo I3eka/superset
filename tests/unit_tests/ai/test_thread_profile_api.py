@@ -141,6 +141,42 @@ def test_message_remembers_and_snapshots_its_profile(
         assert stream.call_args.args[1].profile_key == expected
 
 
+def test_replay_preserves_the_accepted_profile_and_later_selection(
+    client: FlaskClient,
+    session: Session,
+    mocker: MockerFixture,
+    thread: Any,
+) -> None:
+    """An old delivery cannot retarget its run or undo a later profile choice."""
+    from superset.models.ai import AIChatMessage
+
+    submitted = mocker.patch("superset.ai.tasks.submit_turn")
+    url = f"/api/v1/ai/thread/{thread.uuid}/message"
+    first = client.post(url, json={"content": "first", "request_id": "first"})
+    second = client.post(
+        url,
+        json={"content": "second", "request_id": "second", "agent_key": "default"},
+    )
+    replay = client.post(
+        url,
+        json={"content": "changed", "request_id": "first", "agent_key": "default"},
+    )
+
+    assert first.status_code == second.status_code == replay.status_code == 202
+    assert first.json == replay.json
+    session.expire_all()
+    assert thread.agent_key == "default"
+    assert session.query(AIChatMessage).count() == 4
+    assistant = (
+        session.query(AIChatMessage)
+        .filter_by(role="assistant", request_id="first")
+        .one()
+    )
+    assert assistant.extra["agent_key"] == "analyst"
+    if current_app.config["AI_ASSISTANT_EXECUTION_MODE"] == "worker":
+        assert submitted.call_args.args[0].profile_key == "analyst"
+
+
 @pytest.mark.parametrize(
     "rejected",
     ["foreign-thread", "missing-thread", "no-profile", "all-profiles-denied"],

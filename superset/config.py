@@ -3509,9 +3509,9 @@ AI_AGENT_MAX_RESULT_BYTES = 256 * 1024
 # Requires the 'mcp' package; it is imported only once a server is configured.
 AI_AGENT_MCP_SERVERS: dict[str, Any] = {}
 
-# Refuse any external MCP tool whose name advertises SQL execution — anything
-# containing "execute_sql", "run_sql" or "query" by default. Enforced by
-# superset.ai.policy.ForeignToolPolicy.
+# Require an explicit per-server tool_allowlist for external MCP calls.
+# Names and schemas cannot prove what a remote tool executes. Enforced by
+# superset.ai.policy.ForeignToolPolicy; each allowlisted tool is an operator grant.
 #
 # On by default because Superset's read-only enforcement and its per-datasource
 # authorization can only apply to SQL Superset itself runs. A third-party server
@@ -3533,11 +3533,6 @@ AI_ASSISTANT_TIMEZONE = "UTC"
 # Days a conversation is retained. The default Celery beat config runs
 # ``ai.prune_conversations`` daily; non-positive values disable pruning.
 AI_ASSISTANT_MESSAGE_RETENTION_DAYS = 30
-
-# Ordered KnowledgeProvider instances or dotted paths contributing
-# deployment-specific domain knowledge — table catalogs, metric definitions,
-# house SQL conventions. Superset core ships none of this.
-AI_KNOWLEDGE_PROVIDERS: list[Any] = []
 
 # Last-mile hook applied after the system prompt is assembled, mirroring
 # SQL_QUERY_MUTATOR. Lets a deployment append or redact without owning the
@@ -3590,9 +3585,8 @@ AI_TELEMETRY_MAX_CONTENT_CHARS = 10_000
 #
 # Must declare kind "skill" or "knowledge": the safety, persona, process and
 # format layers are reserved for Superset so that they stay portable, and a
-# section here may not claim "superset.core" as its source. Anything large
-# belongs behind a KnowledgeProvider domain instead — every token here is paid
-# on every request.
+# section here may not claim "superset.core" as its source. Keep sections small:
+# every token here is paid on every request.
 #
 #   AI_EXTRA_PROMPT_SECTIONS = [
 #       {

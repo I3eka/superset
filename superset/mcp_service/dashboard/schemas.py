@@ -816,7 +816,7 @@ class GenerateDashboardRequest(BaseModel):
             "dict). When set, replaces the auto-generated layout entirely. "
             "Pass this when you need custom row composition, MARKDOWN "
             "blocks, HEADER components, or specific chart widths/heights. "
-            "Invalid layouts fall back to the auto-generated packed grid. "
+            "Invalid layouts fall back to the auto-generated 2-column grid. "
             "Omit this field to use that grid directly. "
             "Each component's parents is recomputed from its children edges "
             "before saving; omitted or incomplete parents arrays are fine."

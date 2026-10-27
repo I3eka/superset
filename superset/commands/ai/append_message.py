@@ -99,8 +99,9 @@ class AppendAIChatMessageCommand(CreateMixin, BaseCommand):
             status=self._status,
             extra=self._extra,
         )
-        if self._created and message.role == MessageRole.ASSISTANT.value:
-            if agent_key := message.extra.get("agent_key"):
+        if self._created and message.role == MessageRole.ASSISTANT:
+            # Commit the selection with acceptance; a replay must not reset it.
+            if (agent_key := message.extra.get("agent_key")) is not None:
                 self._model.agent_key = agent_key
         return message
 
@@ -132,6 +133,7 @@ class AppendAIChatMessageCommand(CreateMixin, BaseCommand):
         self._model = AIChatThreadDAO.find_by_uuid_for_user(
             self._thread_uuid,
             self._user_id,
+            for_update=True,
         )
         if not self._model:
             raise AIChatThreadNotFoundError(self._thread_uuid)

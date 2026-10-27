@@ -91,6 +91,13 @@ const MAX_INPUT_HISTORY = 50;
 /** A conversation title derived from a message is clipped to this. */
 const MAX_TAB_NAME_LENGTH = 30;
 
+const THREAD_POLL_INTERVAL_MS = 2000;
+
+const isInFlightMessage = (message: ChatMessageWithMeta): boolean =>
+  message.role === 'assistant' &&
+  Boolean(message.runId) &&
+  (message.status === 'pending' || message.status === 'streaming');
+
 export type ChatRunStatus = 'running' | 'cancelling';
 
 /** Shared empty lists keep effect dependencies stable while a chat is empty. */
@@ -102,6 +109,7 @@ interface ActiveChatRun {
   tabId: string;
   threadId: string;
   runId?: string;
+  resolveCheckpoint?: () => void;
   controller: AbortController;
   isStreaming: boolean;
   liveThoughts: string;
@@ -369,15 +377,22 @@ export const useChatBot = (): UseChatBotReturn => {
     [],
   );
 
-  /** Resolved when the user answers a checkpoint; see `streamRun`. */
-  const checkpointGateRef = useRef<{ resolve: () => void } | null>(null);
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+      Object.values(activeRunsByTabRef.current).forEach(run => {
+        run.resolveCheckpoint?.();
+        run.controller.abort();
+        if (run.runId) {
+          cancelChatRun(run.threadId, run.runId).catch(caught => {
+            logging.warn('[ai] the assistant was not told to stop', caught);
+          });
+        }
+      });
+    };
+  }, []);
 
   const activeTab = chatTabs.find(tab => tab.id === activeTabId);
   const messages = activeTab?.messages ?? EMPTY_MESSAGES;
@@ -402,7 +417,10 @@ export const useChatBot = (): UseChatBotReturn => {
   );
 
   const activeRun = activeRunsByTab[activeTabId];
-  const isLoading = Boolean(activeRun);
+  const restoredRun = messages.find(isInFlightMessage);
+  const pollingThreadId =
+    !activeRun && restoredRun ? activeTab?.threadId : undefined;
+  const isLoading = Boolean(activeRun || restoredRun);
   const isStreamingResponse = activeRun?.isStreaming ?? false;
   const liveThoughts = activeRun?.liveThoughts ?? '';
   const liveToolLog = activeRun?.liveToolLog ?? '';
@@ -410,7 +428,7 @@ export const useChatBot = (): UseChatBotReturn => {
   const livePageContext = activeRun?.livePageContext;
   const liveAnswer = activeRun?.liveAnswer ?? '';
   const checkpoint = activeRun?.checkpoint ?? null;
-  const activeRunStatus = activeRun?.status ?? null;
+  const activeRunStatus = activeRun?.status ?? (restoredRun ? 'running' : null);
 
   const pageContext = usePageContext();
   const pageContextRef = useRef(pageContext);
@@ -455,7 +473,7 @@ export const useChatBot = (): UseChatBotReturn => {
   // and failing to scroll must not take the panel down.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
-  }, [messages, liveToolLog, liveThoughts]);
+  }, [messages, liveToolLog, liveThoughts, liveAnswer]);
 
   // -----------------------------------------------------------------------
   // Conversation management
@@ -503,6 +521,29 @@ export const useChatBot = (): UseChatBotReturn => {
     },
     [updateTabs],
   );
+
+  useEffect(() => {
+    if (!pollingThreadId) {
+      return undefined;
+    }
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        await refreshThreadMessages(pollingThreadId);
+      } catch (caught) {
+        await fail(caught, t('The conversation could not be loaded.'));
+      }
+      if (!stopped) {
+        timer = setTimeout(poll, THREAD_POLL_INTERVAL_MS);
+      }
+    };
+    timer = setTimeout(poll, THREAD_POLL_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [fail, pollingThreadId, refreshThreadMessages]);
 
   const handleNewChat = useCallback(async (): Promise<string> => {
     try {
@@ -672,6 +713,7 @@ export const useChatBot = (): UseChatBotReturn => {
         if (!current || current.requestId !== requestId) {
           return previous;
         }
+        current.resolveCheckpoint?.();
         const { [tabId]: _removed, ...rest } = previous;
         return rest;
       });
@@ -679,32 +721,38 @@ export const useChatBot = (): UseChatBotReturn => {
     [updateRuns],
   );
 
-  const releaseCheckpointGate = useCallback(() => {
-    checkpointGateRef.current?.resolve();
-    checkpointGateRef.current = null;
-  }, []);
-
   const handleCheckpointContinue = useCallback(() => {
-    releaseCheckpointGate();
     const tabId = activeTabIdRef.current;
     const run = activeRunsByTabRef.current[tabId];
     if (run) {
+      run.resolveCheckpoint?.();
       updateRunState(tabId, run.requestId, current => ({
         ...current,
         checkpoint: null,
+        resolveCheckpoint: undefined,
       }));
     }
-  }, [releaseCheckpointGate, updateRunState]);
+  }, [updateRunState]);
 
   const handleCancelRun = useCallback(async () => {
     const tabId = activeTabIdRef.current;
     const run = activeRunsByTabRef.current[tabId];
     if (!run) {
+      const tab = chatTabsRef.current.find(candidate => candidate.id === tabId);
+      const savedRun = tab?.messages.find(isInFlightMessage);
+      if (tab?.threadId && savedRun?.runId) {
+        try {
+          await cancelChatRun(tab.threadId, savedRun.runId);
+          await refreshThreadMessages(tab.threadId);
+        } catch (caught) {
+          logging.warn('[ai] the assistant was not told to stop', caught);
+        }
+      }
       return;
     }
     // A run paused at a checkpoint is not reading, so the gate is released first
     // or the abort would not be noticed until the user pressed Continue.
-    releaseCheckpointGate();
+    run.resolveCheckpoint?.();
     updateRunState(tabId, run.requestId, current => ({
       ...current,
       status: 'cancelling',
@@ -718,9 +766,9 @@ export const useChatBot = (): UseChatBotReturn => {
         // stopped, so a failure here is worth a log and nothing more.
         logging.warn('[ai] the assistant was not told to stop', caught);
       }
+      clearRunIfMatches(tabId, run.requestId);
     }
-    clearRunIfMatches(tabId, run.requestId);
-  }, [clearRunIfMatches, releaseCheckpointGate, updateRunState]);
+  }, [clearRunIfMatches, refreshThreadMessages, updateRunState]);
 
   // -----------------------------------------------------------------------
   // Sending
@@ -747,7 +795,13 @@ export const useChatBot = (): UseChatBotReturn => {
       const source = messageOverride ?? inputValue;
       const trimmedMessage = source.trim();
       const originTabId = activeTabIdRef.current;
-      if (!trimmedMessage || activeRunsByTabRef.current[originTabId]) {
+      if (
+        !trimmedMessage ||
+        activeRunsByTabRef.current[originTabId] ||
+        chatTabsRef.current
+          .find(tab => tab.id === originTabId)
+          ?.messages.some(isInFlightMessage)
+      ) {
         return;
       }
       const agentKey = chatTabsRef.current.find(
@@ -803,9 +857,7 @@ export const useChatBot = (): UseChatBotReturn => {
         },
       ]);
 
-      // There is no system-message channel in this contract, so a directive from
-      // an AI action travels with the page context, which is the field the
-      // backend already turns into prompt preamble.
+      // Action directives travel with page context and enter the user prompt.
       const directive = systemPromptOverride?.trim();
       const contextPayload = buildRequestPageContext(
         includePageContext ? pageContextRef.current : undefined,
@@ -929,6 +981,11 @@ export const useChatBot = (): UseChatBotReturn => {
           agentKey,
           pageContext: contextPayload,
         });
+        if (controller.signal.aborted) {
+          // Stop may precede the POST response that gives us the server run ID.
+          await cancelChatRun(threadId, run.runId);
+          return;
+        }
         updateRunState(targetTabId, requestId, current => ({
           ...current,
           runId: run.runId,
@@ -982,12 +1039,12 @@ export const useChatBot = (): UseChatBotReturn => {
               return Promise.resolve();
             }
             return new Promise<void>(resolve => {
-              checkpointGateRef.current = { resolve };
               updateRunState(targetTabId, requestId, current => ({
                 ...current,
                 liveToolLog: currentToolLog,
                 liveToolCalls: [...toolCallSteps],
                 checkpoint: parsed,
+                resolveCheckpoint: resolve,
               }));
             });
           },
