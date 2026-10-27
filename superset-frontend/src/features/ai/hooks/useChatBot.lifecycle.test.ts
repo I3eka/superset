@@ -114,7 +114,11 @@ test.each(['complete', 'error', 'cancelled'])(
     });
 
     await waitFor(() =>
-      expect(result.current.messages[0].content).toBe('saved result'),
+      expect(result.current.messages[0].content).toBe(
+        status === 'error'
+          ? 'saved result\n\n---\n_The assistant did not finish this run._'
+          : 'saved result',
+      ),
     );
     expect(result.current.isLoading).toBe(false);
     expect(result.current.messages[0]).toMatchObject({
