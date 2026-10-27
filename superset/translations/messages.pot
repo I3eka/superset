@@ -11593,6 +11593,9 @@ msgstr ""
 msgid "Recipients are separated by \",\" or \";\""
 msgstr ""
 
+msgid "Recorded output was clipped for history."
+msgstr ""
+
 msgid "Records"
 msgstr ""
 
@@ -15512,6 +15515,12 @@ msgid ""
 msgstr ""
 
 #, python-format
+msgid ""
+"The selected %(type)s are used by %(charts)s. Archiving them will make "
+"dependent charts unavailable until they are recovered."
+msgstr ""
+
+#, python-format
 msgid "The selected %s are linked to %s on %s. Deleting them will break those objects."
 msgstr ""
 
@@ -16012,8 +16021,20 @@ msgstr ""
 
 #, python-format
 msgid ""
+"This %(schedule)s executes as another user. Only admins can change its content; set "
+"the Run As field to your own account to make this change."
+msgstr ""
+
+#, python-format
+msgid ""
 "This %(type)s is linked to %(charts)s on %(dashboards)s. Archiving it "
 "will make dependent charts unavailable until it is recovered."
+msgstr ""
+
+#, python-format
+msgid ""
+"This %(type)s is used by %(charts)s. Archiving it will make dependent charts"
+" unavailable until it is recovered."
 msgstr ""
 
 #, python-format
