@@ -291,6 +291,11 @@ rules along with everything else. Your deployment then owns them.
 `AI_SYSTEM_PROMPT_MUTATOR` is a last-mile callable applied after assembly,
 mirroring `SQL_QUERY_MUTATOR`.
 
+On-demand knowledge providers are not implemented. The unused
+`AI_KNOWLEDGE_PROVIDERS` setting and profile `knowledge_domains` field have been
+removed from this draft. Use small `AI_EXTRA_PROMPT_SECTIONS` for deployment
+guidance; these sections are included on every turn.
+
 ## Where turns execute
 
 `AI_ASSISTANT_EXECUTION_MODE` decides where the work happens.
@@ -325,8 +330,11 @@ Worker cancellation flags use this same connection, so no second cache setting
 is required.
 
 Selecting `"worker"` with the in-memory event bus raises rather than leaving
-every stream silently empty, and so does selecting the Redis bus without a
-usable connection.
+every stream silently empty. Redis and Redis Sentinel backend configurations are
+supported; constructing a backend does not verify network connectivity.
+
+Worker cancellation uses this same Redis connection and a flag with a 15-minute
+TTL. It does not depend on the general cache being shared between processes.
 
 Before queuing a worker turn, Superset checks Redis connectivity and
 authentication with `PING`. A failed check returns an error without enqueueing
@@ -370,6 +378,16 @@ instructions for that turn. They enter a user-role message before the question,
 and are included in the recorded context. They do not acquire system authority or
 override operator policies. The renderer accepts only nonblank strings from the
 first ten entries and caps the combined instruction section at 4,000 characters.
+
+Provider transport failures use the provider's `retry_policy()` and a circuit
+breaker scoped to the run (five consecutive failures). Permanent request errors
+are not retried. Streaming calls can retry only before the first provider event;
+an interrupted partial answer is reported as failed without replaying its text
+or tool calls. These retries do not restart the entire turn.
+
+The conversation list accepts `limit` from 1 to 100 (default 50) and a nonnegative
+`offset` up to 2,147,483,647 (default 0). Invalid values return `422`. Message
+counts are aggregated for the requested page without loading conversation bodies.
 
 ## Safety and limits
 
