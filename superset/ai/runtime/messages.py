@@ -24,10 +24,12 @@ whatever provider a deployment configures.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import aclosing
+from typing import Any, TypeVar
 
 from superset.ai.events import (
     assistant_delta_event,
@@ -62,6 +64,12 @@ from superset.ai.types import MessageRole, ProgressStage, TokenUsage
 from superset.utils import json
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
+
+
+class _RunDeadlineError(Exception):
+    """The run budget expired while awaiting the provider."""
+
 
 #: Maximum UTF-8 bytes kept in the persisted audit output. The model
 #: still sees the whole thing; this is the audit copy.
@@ -135,7 +143,7 @@ class MessagesApiRuntime(BaseAgentRuntime):
                     yield final_event(self._result.answer)
                 return
 
-            answer = "\n\n".join(part for part in answer_parts if part).strip()
+            answer = self._result.answer.strip()
             self._result.answer = answer or _NO_ANSWER
 
             # Only replayed when nothing was streamed — a provider without
@@ -176,6 +184,8 @@ class MessagesApiRuntime(BaseAgentRuntime):
 
             async for event in self._safe_turn(request, conversation, turn):
                 yield event
+            if self._result.timed_out:
+                return
             response = self._last_response
             if response is None:
                 yield error_event()
@@ -300,6 +310,11 @@ class MessagesApiRuntime(BaseAgentRuntime):
         try:
             async for event in self._one_turn(request, conversation):
                 yield event
+        except _RunDeadlineError as ex:
+            self._result.timed_out = True
+            self._trace_model_call(recorder, request, turn, started, error=ex)
+            self._last_response = None
+            return
         except LLMError as ex:
             logger.warning("AI provider error on turn %s: %s", turn, ex)
             self._result.error = str(ex)
@@ -372,10 +387,12 @@ class MessagesApiRuntime(BaseAgentRuntime):
         )
 
         if not self.provider.supports_streaming:
-            self._last_response = await with_retries(
-                lambda: self.provider.complete(completion),
-                self.provider.retry_policy(),
-                breaker=self._breaker,
+            self._last_response = await self._await_provider(
+                with_retries(
+                    lambda: self.provider.complete(completion),
+                    self.provider.retry_policy(),
+                    breaker=self._breaker,
+                )
             )
             return
 
@@ -385,26 +402,34 @@ class MessagesApiRuntime(BaseAgentRuntime):
         usage = None
         stop_reason = None
 
-        async for event in stream_with_retries(
+        stream = stream_with_retries(
             lambda: self.provider.stream(completion),
             self.provider.retry_policy(),
             breaker=self._breaker,
-        ):
-            if event.kind is StreamEventKind.TEXT:
-                if event.text:
-                    if not text_parts and self._result.answer:
-                        yield assistant_delta_event("\n\n")
-                    text_parts.append(event.text)
-                    self._streamed_text = True
-                    yield assistant_delta_event(event.text)
-            elif event.kind is StreamEventKind.THINKING:
-                thinking_parts.append(event.text)
-            elif event.kind is StreamEventKind.TOOL_USE and event.tool_call:
-                tool_calls.append(event.tool_call)
-            elif event.kind is StreamEventKind.USAGE:
-                usage = event.usage
-            elif event.kind is StreamEventKind.STOP:
-                stop_reason = event.stop_reason
+        )
+        async with aclosing(stream):
+            while True:
+                try:
+                    event = await self._await_provider(anext(stream))
+                except StopAsyncIteration:
+                    break
+                if event.kind is StreamEventKind.TEXT:
+                    if event.text:
+                        if not text_parts and self._result.answer:
+                            self._result.answer += "\n\n"
+                            yield assistant_delta_event("\n\n")
+                        text_parts.append(event.text)
+                        self._result.answer += event.text
+                        self._streamed_text = True
+                        yield assistant_delta_event(event.text)
+                elif event.kind is StreamEventKind.THINKING:
+                    thinking_parts.append(event.text)
+                elif event.kind is StreamEventKind.TOOL_USE and event.tool_call:
+                    tool_calls.append(event.tool_call)
+                elif event.kind is StreamEventKind.USAGE:
+                    usage = event.usage
+                elif event.kind is StreamEventKind.STOP:
+                    stop_reason = event.stop_reason
 
         self._last_response = LLMResponse(
             text="".join(text_parts),
@@ -413,6 +438,20 @@ class MessagesApiRuntime(BaseAgentRuntime):
             usage=usage or {},
             stop_reason=stop_reason or ("tool_use" if tool_calls else "end_turn"),
         )
+
+    async def _await_provider(self, pending: Awaitable[T]) -> T:
+        """Bound each await without keeping a task timeout across yielded events."""
+        timeout = asyncio.timeout(max(0, self._deadline - time.monotonic()))
+        try:
+            async with timeout:
+                result = await pending
+        except TimeoutError:
+            if timeout.expired():
+                raise _RunDeadlineError from None
+            raise
+        if time.monotonic() >= self._deadline:
+            raise _RunDeadlineError
+        return result
 
     def _invoke_tool(
         self,
