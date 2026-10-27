@@ -342,8 +342,7 @@ class TestAIApi(SupersetTestCase):
             == second.json["result"]["assistant_message_uuid"]
         )
         assert first.json["result"]["run_id"] == second.json["result"]["run_id"]
-        # Both submissions may enqueue the same unclaimed run. The execution
-        # claim, not the broker acknowledgement, prevents repeated inference.
+        # Both unclaimed deliveries carry the same run; only one can claim it.
         assert start_run.call_count == 2
         assert start_run.call_args_list[0] == start_run.call_args_list[1]
 
@@ -352,6 +351,10 @@ class TestAIApi(SupersetTestCase):
             m for m in fetched.json["result"]["messages"] if m["role"] == "user"
         ]
         assert len(user_messages) == 1
+        assistant_messages = [
+            m for m in fetched.json["result"]["messages"] if m["role"] == "assistant"
+        ]
+        assert len(assistant_messages) == 1
 
     def test_deleting_a_thread_removes_its_messages(self) -> None:
         """Conversations are deleted whole."""

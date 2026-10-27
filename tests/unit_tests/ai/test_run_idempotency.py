@@ -139,14 +139,14 @@ def test_post_replay_keeps_run_and_accepted_context(
         client,
         conversation,
         model="first-model",
-        agent_key="analyst",
+        agent_key="first-agent",
         page_context=context,
     )
     replay = _post(
         client,
         conversation,
         model="different-model",
-        agent_key="default",
+        agent_key="different-agent",
         page_context={"dashboard_id": 43},
     )
     assert first.status_code == replay.status_code == 202
@@ -160,7 +160,7 @@ def test_post_replay_keeps_run_and_accepted_context(
     for call in submitted.call_args_list:
         assert call.args[0].run_id == first.json["result"]["run_id"]
         assert call.args[0].model == "first-model"
-        assert call.args[0].profile_key == "analyst"
+        assert call.args[0].profile_key == "first-agent"
         assert call.args[0].page_context == context
 
 
